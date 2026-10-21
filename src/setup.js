@@ -48,7 +48,7 @@ export async function setup({ wait = process.stdin.isTTY, update = true, waitMin
 
   say("3/4 Checking the hook commands run");
   const broken = checkHookCommands();
-  say(broken.length ? broken.map((b) => `    FAILED ${b}`).join("\n") : `    ok (${process.platform === "win32" ? "cmd, PowerShell and bash" : "sh"})`);
+  say(broken.length ? broken.map((b) => `    FAILED ${b}`).join("\n") : `    ok (${process.platform === "win32" ? "cmd, PowerShell and bash" : "sh and bash"})`);
 
   say("4/4 Codex hook approval");
   let approval = codexApproval();
@@ -174,7 +174,7 @@ function checkHookCommands() {
           ["PowerShell", (c) => ["powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", c]]],
           ...(gitBash() ? [["bash", (c) => [gitBash(), ["-c", c]]]] : []),
         ]
-      : [["sh", (c) => ["/bin/sh", ["-c", c]]]];
+      : [["sh", (c) => ["/bin/sh", ["-c", c]]], ...(fs.existsSync("/bin/bash") ? [["bash", (c) => ["/bin/bash", ["-c", c]]]] : [])];
   for (const kind of ["claude", "codex"]) {
     for (const [label, build] of shells) {
       const [cmd, args] = build(hookCommand(kind));

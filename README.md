@@ -20,7 +20,22 @@ Download the file for your machine from the
 | Mac (Intel) | `agent-bridge-macos-x64` |
 | Linux | `agent-bridge-linux-x64` |
 
-**Windows:** double-click it. **Mac/Linux:** run it from a terminal (`chmod +x` it first).
+**Windows:** double-click it, or in PowerShell:
+
+```powershell
+gh release download --repo tony-xmelon/agent-bridge --pattern "agent-bridge-windows-x64.exe" --dir $HOME\Downloads --clobber; & "$HOME\Downloads\agent-bridge-windows-x64.exe"
+```
+
+**Mac / Linux:** paste this into Terminal. It picks the right file for Apple
+Silicon, Intel or Linux, and avoids Gatekeeper prompts because Terminal
+downloads aren't quarantined:
+
+```bash
+gh release download --repo tony-xmelon/agent-bridge --pattern "agent-bridge-$([ "$(uname)" = Darwin ] && echo macos || echo linux)-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" --output /tmp/agent-bridge --clobber && chmod +x /tmp/agent-bridge && /tmp/agent-bridge
+```
+
+(`gh` is the GitHub CLI: `brew install gh && gh auth login` on a Mac. It's
+needed because the repo is private.)
 
 It has Node built in, so it needs nothing else installed. It copies itself to
 `~/.agent-bridge/bin`, sets everything up, and waits while you click **Trust**
@@ -31,8 +46,9 @@ using the old version.
 The files are unsigned:
 - **Windows:** SmartScreen may say "Windows protected your PC". Click
   **More info → Run anyway**.
-- **Mac:** remove the quarantine flag first:
-  `xattr -d com.apple.quarantine agent-bridge-macos-*`.
+- **Mac:** if you downloaded the file with a browser instead, remove the
+  quarantine flag first: `xattr -d com.apple.quarantine agent-bridge-macos-*`.
+  The Terminal command above doesn't need this.
 
 ### Alternative: from the source (needs Git)
 
@@ -134,9 +150,9 @@ are kept for 30 days. Hook activity is logged to `~/.agent-bridge/hook.log`.
 ## Test and build
 
 ```bash
-npm test                 # smoke test against the source
+npm test                 # smoke test + setup end-to-end test (throwaway home), against the source
 npm install && npm run build:exe   # standalone executable for this platform, in dist/
-AGENT_BRIDGE_EXE=dist/agent-bridge-<os>-<arch> npm test   # same test against the executable
+AGENT_BRIDGE_EXE=dist/agent-bridge-<os>-<arch> npm test   # same tests against the executable
 ```
 
 Releases: push a tag like `v0.2.0`. The `release` workflow builds and tests the

@@ -141,7 +141,15 @@ export function findCodex() {
       candidates.push(...dirs);
     } catch {}
   } else if (process.platform === "darwin") {
-    candidates.push("/Applications/Codex.app/Contents/Resources/codex");
+    // The desktop app bundles its CLI at
+    // <App>.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex.
+    for (const apps of ["/Applications", path.join(os.homedir(), "Applications")]) {
+      try {
+        for (const app of fs.readdirSync(apps).filter((a) => a.endsWith(".app"))) {
+          candidates.push(path.join(apps, app, "Contents", "Resources", "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex"));
+        }
+      } catch {}
+    }
   }
   // CODEX_CLI_PATH last: Codex sets it for its own children, and it goes
   // stale when Codex updates while the app keeps running.
