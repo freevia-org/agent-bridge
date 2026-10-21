@@ -1,0 +1,21 @@
+{
+  "name": "agent-bridge",
+  "version": "0.1.0",
+  "description": "Local mailbox that lets Claude Code and Codex sessions message each other (MCP server + hooks, zero dependencies).",
+  "type": "module",
+  "bin": {
+    "agent-bridge": "bin/agent-bridge.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node test/smoke.js"
+  },
+  "license": "MIT"
+}
