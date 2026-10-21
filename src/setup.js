@@ -23,7 +23,7 @@ export async function setup({ wait = process.stdin.isTTY, update = true, waitMin
   const rerun = (extra) => spawnSync(extra[0], [...extra.slice(1), "setup", "--no-update", ...(wait ? [] : ["--no-wait"])], { stdio: "inherit" }).status ?? 0;
 
   // The executable installs itself to a fixed place first; hooks point there.
-  if (IS_EXE && path.resolve(process.execPath).toLowerCase() !== path.resolve(EXE_HOME).toLowerCase()) {
+  if (IS_EXE && !sameFile(process.execPath, EXE_HOME)) {
     placeExecutable();
     say(`Installed agent-bridge to ${EXE_HOME}\n`);
     process.exit(rerun([EXE_HOME]));
@@ -72,20 +72,35 @@ export async function setup({ wait = process.stdin.isTTY, update = true, waitMin
   say("\nNew Claude Code sessions get the agent-bridge tools; sessions that were already open only get the hooks.");
 }
 
-// Copies this executable to EXE_HOME. A copy that Codex or Claude Code is
-// running can't be overwritten on Windows, but it can be renamed, so the old
-// one is moved aside (and cleaned up on a later run, once nothing uses it).
+// Same file on disk, whatever the path says: on macOS /var is a symlink to
+// /private/var, so the running executable's path and EXE_HOME can differ
+// textually while being the same file.
+function sameFile(a, b) {
+  try {
+    const x = fs.statSync(a), y = fs.statSync(b);
+    return x.dev === y.dev && x.ino === y.ino;
+  } catch {
+    return false;
+  }
+}
+
+// Copies this executable to EXE_HOME. The copy goes to a temporary file first
+// and is then moved into place, so the source is never removed. A copy that
+// Codex or Claude Code is running can't be replaced on Windows, but it can be
+// renamed, so the old one is moved aside (and cleaned up on a later run).
 function placeExecutable() {
   const dir = path.dirname(EXE_HOME);
   fs.mkdirSync(dir, { recursive: true });
   for (const f of fs.readdirSync(dir)) {
     if (f.includes(".old-")) try { fs.unlinkSync(path.join(dir, f)); } catch {}
   }
-  if (fs.existsSync(EXE_HOME)) {
+  const tmp = `${EXE_HOME}.new-${process.pid}`;
+  fs.copyFileSync(process.execPath, tmp);
+  if (process.platform !== "win32") fs.chmodSync(tmp, 0o755);
+  if (process.platform === "win32" && fs.existsSync(EXE_HOME)) {
     try { fs.unlinkSync(EXE_HOME); } catch { fs.renameSync(EXE_HOME, `${EXE_HOME}.old-${Date.now()}`); }
   }
-  fs.copyFileSync(process.execPath, EXE_HOME);
-  if (process.platform !== "win32") fs.chmodSync(EXE_HOME, 0o755);
+  fs.renameSync(tmp, EXE_HOME); // atomic replace on macOS/Linux, even while the old one runs
 }
 
 function git(...args) {
