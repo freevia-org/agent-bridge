@@ -11,6 +11,7 @@ const USAGE = `agent-bridge: let Claude Code and Codex sessions message each oth
   agent-bridge send --to <name|kind> [--from you] <text...>       send a message (from "user" by default)
   agent-bridge inbox --as <name> [--peek]                         read a mailbox
   agent-bridge thread <thread-id>                                 show a thread
+  agent-bridge link --codex-thread <id> [--name codex@x]          make an existing Codex thread reachable without opening it
   agent-bridge watch --as <name>                                  print one line per new message (for Claude's Monitor tool)
 
   (internal) agent-bridge mcp --kind claude|codex [--name n]       stdio MCP server
@@ -49,6 +50,13 @@ try {
       needKind();
       const { runMcpServer } = await import("../src/mcp.js");
       runMcpServer({ kind, name: flags.name || process.env.AGENT_BRIDGE_NAME });
+      break;
+    }
+    case "link": {
+      const { linkCodexThread } = await import("../src/wake.js");
+      if (!flags["codex-thread"]) throw new Error("usage: agent-bridge link --codex-thread <id> [--cwd dir] [--name codex@x]");
+      const s = linkCodexThread(flags["codex-thread"], { cwd: flags.cwd, name: flags.name });
+      console.log(`linked ${s.name} -> Codex thread ${s.sessionId} (${s.cwd})`);
       break;
     }
     case "wake-check": {

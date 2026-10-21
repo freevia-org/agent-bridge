@@ -118,6 +118,12 @@ try {
   // queued copy into the same turn) must not add anything.
   assert.equal(hook("codex", { hook_event_name: "UserPromptSubmit", session_id: "codex-sess", cwd: PROJECT, transcript_path: "x", prompt: "[agent-bridge nudge] x" }), null);
 
+  // A linked name reaches its thread even though the folder name differs.
+  spawnSync(process.execPath, [CLI, "link", "--codex-thread", "linked-sess", "--cwd", PROJECT, "--name", "codex@nickname"], { env });
+  await claude.call("send", { to: "codex@nickname", body: "via link" });
+  const linkedOut = hook("codex", { hook_event_name: "UserPromptSubmit", session_id: "linked-sess", cwd: PROJECT, transcript_path: "x" });
+  assert.match(linkedOut.hookSpecificOutput.additionalContext, /via link/);
+
   // Threads keep both directions.
   const thread = (await claude.call("send", { to: "codex", body: "t1" })).sent.thread;
   assert.match(await claude.call("thread", { thread }), /t1/);

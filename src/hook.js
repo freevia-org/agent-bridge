@@ -63,7 +63,7 @@ function handle(kind, input) {
   if (isEphemeral(kind, input)) return null;
   const event = input.hook_event_name || input.hookEventName;
   const cwd = input.cwd || process.cwd();
-  const names = myNames(kind, cwd);
+  const names = myNames(kind, cwd, input.session_id);
   const remember = (idle) => {
     for (const n of names) store.recordSession(n, { kind, sessionId: input.session_id, cwd, idle });
   };
@@ -140,16 +140,18 @@ function context(event, text) {
   return { hookSpecificOutput: { hookEventName: event, additionalContext: text } };
 }
 
-// The session's default mailbox, plus any names a live MCP server of the same
-// kind in the same folder has taken with set_name.
-function myNames(kind, cwd) {
+// The session's mailboxes: names registered to this exact session (e.g. by
+// `agent-bridge link`) first, then the folder default, plus any names a live
+// MCP server of the same kind in the same folder has taken with set_name.
+function myNames(kind, cwd, sessionId) {
+  const linked = sessionId ? store.listSessions(kind).filter((s) => s.sessionId === sessionId).map((s) => s.name) : [];
   const base = store.defaultName(kind, cwd);
   const resolved = path.resolve(cwd).toLowerCase();
   const extra = store
     .listAgents({ includeOffline: false })
     .filter((a) => a.kind === kind && a.host === os.hostname() && a.cwd && path.resolve(a.cwd).toLowerCase() === resolved)
     .map((a) => a.name);
-  return [...new Set([base, ...extra])];
+  return [...new Set([...linked, base, ...extra])];
 }
 
 function stateFile(sessionId) {

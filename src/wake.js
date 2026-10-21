@@ -78,6 +78,38 @@ export async function wakeCheck({ name, nudgedAt, from }) {
   log(name, `codex exec resume exited with ${code}`);
 }
 
+// Registers an existing Codex thread the hooks have not seen yet (e.g. one
+// last used before install), so it can be messaged without opening it. The
+// folder comes from the thread's rollout file (its first line is the
+// session_meta record) unless given.
+export function linkCodexThread(threadId, { cwd, name } = {}) {
+  if (!cwd) {
+    const root = path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "sessions");
+    const file = findFile(root, (f) => f.endsWith(`${threadId}.jsonl`));
+    if (!file) throw new Error(`no rollout file for thread ${threadId} under ${root}; pass --cwd`);
+    const meta = JSON.parse(fs.readFileSync(file, "utf8").split("\n", 1)[0]);
+    cwd = meta?.payload?.cwd;
+    if (!cwd) throw new Error(`thread ${threadId} has no cwd in its session_meta; pass --cwd`);
+  }
+  cwd = cwd.replace(/^\\\\\?\\/, "");
+  const n = store.sanitizeName(name || store.defaultName("codex", cwd));
+  store.recordSession(n, { kind: "codex", sessionId: threadId, cwd, idle: true });
+  return { name: n, sessionId: threadId, cwd };
+}
+
+function findFile(dir, match) {
+  let entries = [];
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return null; }
+  for (const e of entries) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      const hit = findFile(p, match);
+      if (hit) return hit;
+    } else if (match(e.name)) return p;
+  }
+  return null;
+}
+
 function detached(cmd, args) {
   // cwd: home, so a lingering helper never locks a project folder (Windows).
   const child = spawn(cmd, args, { detached: true, stdio: "ignore", windowsHide: true, cwd: os.homedir() });
