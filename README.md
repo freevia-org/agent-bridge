@@ -9,7 +9,7 @@ Zero dependencies. Needs Node 18+. Works on Windows, macOS and Linux.
 ## Install (once per machine)
 
 ```bash
-git clone <this repo> ~/agent-bridge
+git clone https://github.com/tony-xmelon/agent-bridge.git ~/agent-bridge
 node ~/agent-bridge/bin/agent-bridge.js install
 ```
 
