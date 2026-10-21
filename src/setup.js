@@ -10,25 +10,32 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
+import { IS_EXE, ROOT, SELF, EXE_HOME } from "./self.js";
 import * as store from "./store.js";
 import { install, doctor, formatDoctor, codexApproval, hookCommand } from "./install.js";
 import { linkCodexThread } from "./wake.js";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CODEX_HOME = () => process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 const say = (s = "") => console.log(s);
 
 export async function setup({ wait = process.stdin.isTTY, update = true, waitMinutes = 15 } = {}) {
-  if (update && fs.existsSync(path.join(ROOT, ".git"))) {
+  const rerun = (extra) => spawnSync(extra[0], [...extra.slice(1), "setup", "--no-update", ...(wait ? [] : ["--no-wait"])], { stdio: "inherit" }).status ?? 0;
+
+  // The executable installs itself to a fixed place first; hooks point there.
+  if (IS_EXE && path.resolve(process.execPath).toLowerCase() !== path.resolve(EXE_HOME).toLowerCase()) {
+    placeExecutable();
+    say(`Installed agent-bridge to ${EXE_HOME}\n`);
+    process.exit(rerun([EXE_HOME]));
+  }
+
+  if (update && ROOT && fs.existsSync(path.join(ROOT, ".git"))) {
     const before = git("rev-parse", "HEAD");
     const pulled = spawnSync("git", ["-C", ROOT, "pull", "--ff-only", "-q"], { encoding: "utf8" });
     if (pulled.status !== 0) say(`(could not update: ${(pulled.stderr || "").trim().split("\n")[0]}; continuing with this version)`);
     else if (git("rev-parse", "HEAD") !== before) {
       say("Updated agent-bridge; restarting setup with the new version.\n");
-      const again = spawnSync(process.execPath, [path.join(ROOT, "bin", "agent-bridge.js"), "setup", "--no-update", ...(wait ? [] : ["--no-wait"])], { stdio: "inherit" });
-      process.exit(again.status ?? 0);
+      process.exit(rerun(SELF));
     }
   }
 
@@ -63,6 +70,22 @@ export async function setup({ wait = process.stdin.isTTY, update = true, waitMin
   say("\nSetup check:");
   say(formatDoctor(doctor()));
   say("\nNew Claude Code sessions get the agent-bridge tools; sessions that were already open only get the hooks.");
+}
+
+// Copies this executable to EXE_HOME. A copy that Codex or Claude Code is
+// running can't be overwritten on Windows, but it can be renamed, so the old
+// one is moved aside (and cleaned up on a later run, once nothing uses it).
+function placeExecutable() {
+  const dir = path.dirname(EXE_HOME);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of fs.readdirSync(dir)) {
+    if (f.includes(".old-")) try { fs.unlinkSync(path.join(dir, f)); } catch {}
+  }
+  if (fs.existsSync(EXE_HOME)) {
+    try { fs.unlinkSync(EXE_HOME); } catch { fs.renameSync(EXE_HOME, `${EXE_HOME}.old-${Date.now()}`); }
+  }
+  fs.copyFileSync(process.execPath, EXE_HOME);
+  if (process.platform !== "win32") fs.chmodSync(EXE_HOME, 0o755);
 }
 
 function git(...args) {

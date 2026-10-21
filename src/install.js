@@ -10,10 +10,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import * as store from "./store.js";
 import { findCodex } from "./wake.js";
+import { SELF, IS_EXE } from "./self.js";
 
 const SERVER = "agent-bridge";
 // Recognises our hook commands, including ones written by older versions
@@ -25,7 +25,8 @@ const HOOKS = {
   UserPromptSubmit: { snake: "user_prompt_submit", title: "agent-bridge: attach messages from other agents to your prompt" },
   Stop: { snake: "stop", title: "agent-bridge: deliver messages that arrived during the turn" },
 };
-const CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "agent-bridge.js");
+const quoteArg = (p) => (/\s/.test(p) ? `"${p}"` : p);
+const runSelf = (...args) => [...SELF, ...args].map(quoteArg).join(" ");
 
 const claudeJson = () => path.join(os.homedir(), ".claude.json");
 const claudeSettings = () => path.join(os.homedir(), ".claude", "settings.json");
@@ -51,7 +52,7 @@ function shellPath(p) {
   const out = path.join(folder, path.basename(p)).replace(/\\/g, "/");
   return /\s/.test(out) ? `"${out}"` : out;
 }
-export const hookCommand = (kind) => `${shellPath(process.execPath)} ${shellPath(CLI)} hook --kind ${kind}`;
+export const hookCommand = (kind) => `${SELF.map(shellPath).join(" ")} hook --kind ${kind}`;
 
 export function install({ claude = true, codex = true, dryRun = false } = {}) {
   const log = [];
@@ -59,7 +60,7 @@ export function install({ claude = true, codex = true, dryRun = false } = {}) {
   if (claude) {
     editJson(claudeJson(), dryRun, log, (cfg) => {
       cfg.mcpServers ??= {};
-      cfg.mcpServers[SERVER] = { type: "stdio", command: process.execPath, args: [CLI, "mcp", "--kind", "claude"], env: {} };
+      cfg.mcpServers[SERVER] = { type: "stdio", command: SELF[0], args: [...SELF.slice(1), "mcp", "--kind", "claude"], env: {} };
     });
     editJson(claudeSettings(), dryRun, log, (cfg) => {
       setHooks(cfg, "claude");
@@ -72,8 +73,8 @@ export function install({ claude = true, codex = true, dryRun = false } = {}) {
     editText(codexConfig(), dryRun, log, (toml) => {
       const block = [
         `[mcp_servers.${SERVER}]`,
-        `command = ${tomlStr(process.execPath)}`,
-        `args = [${[CLI, "mcp", "--kind", "codex"].map(tomlStr).join(", ")}]`,
+        `command = ${tomlStr(SELF[0])}`,
+        `args = [${[...SELF.slice(1), "mcp", "--kind", "codex"].map(tomlStr).join(", ")}]`,
         `startup_timeout_sec = 20.0`,
         `tool_timeout_sec = 900.0`,
         `default_tools_approval_mode = "approve"`,
@@ -97,7 +98,7 @@ export function install({ claude = true, codex = true, dryRun = false } = {}) {
     for (const k of codexTrustKeys(readJson(codexHooks()))) {
       if (canonical(handlerAt(oldCodexHooks, k.key)) !== canonical(handlerAt(readJson(codexHooks()), k.key))) trustAtInstall[k.key] = trustedHash(toml, k.key);
     }
-    fs.writeFileSync(installRecord(), JSON.stringify({ installedAt: new Date().toISOString(), cli: CLI, node: process.execPath, trustAtInstall }, null, 2));
+    fs.writeFileSync(installRecord(), JSON.stringify({ installedAt: new Date().toISOString(), command: SELF, trustAtInstall }, null, 2));
   }
   return log;
 }
@@ -128,22 +129,23 @@ export function doctor() {
   const read = (f) => { try { return fs.readFileSync(f, "utf8"); } catch { return ""; } };
   const json = (f) => { try { return JSON.parse(read(f)); } catch { return null; } };
   const rec = json(installRecord());
-  const reinstall = `node "${CLI}" install`;
+  const reinstall = runSelf("setup");
   const since = rec ? Date.parse(rec.installedAt) : 0;
   const lastHook = (kind) => lastHookRun(kind, since);
 
-  add(Number(process.versions.node.split(".")[0]) >= 18, `Node ${process.versions.node} (18+ required)`, "Install Node 18 or newer.");
+  if (IS_EXE) info(`Runtime: built into agent-bridge (Node ${process.versions.node})`);
+  else add(Number(process.versions.node.split(".")[0]) >= 18, `Node ${process.versions.node} (18+ required)`, "Install Node 18 or newer.");
 
   // Claude Code
   const cMcp = json(claudeJson())?.mcpServers?.[SERVER];
-  add(cMcp?.args?.[0] === CLI, "Claude Code: MCP server registered", reinstall);
+  add(cMcp?.command === SELF[0] && canonical(cMcp.args?.slice(0, SELF.length - 1)) === canonical(SELF.slice(1)), "Claude Code: MCP server registered", reinstall);
   add(hooksCurrent(json(claudeSettings()), "claude"), "Claude Code: hooks installed and current", reinstall);
   const cRun = lastHook("claude");
   info(`Claude Code: hooks have run since install${cRun ? ` (last ${cRun})` : ": not yet (they run on the next Claude prompt)"}`);
 
   // Codex
   const toml = read(codexConfig());
-  add(toml.includes(`[mcp_servers.${SERVER}]`) && toml.includes(CLI), "Codex: MCP server registered", reinstall);
+  add(toml.includes(`[mcp_servers.${SERVER}]`) && toml.includes(SELF[SELF.length - 1]), "Codex: MCP server registered", reinstall);
   add(hooksCurrent(json(codexHooks()), "codex"), "Codex: hooks installed and current", reinstall);
   const { missing } = codexApproval();
   add(!missing.length, `Codex: hooks approved${missing.length ? ` (missing: ${missing.join(", ")})` : ""}`,
@@ -179,7 +181,7 @@ export function formatDoctor(checks) {
 }
 
 export function status() {
-  return { cli: CLI, node: process.execPath, checks: doctor() };
+  return { command: SELF, checks: doctor() };
 }
 
 // Codex keys hook approval by "<hooks.json path>:<event>:<group index>:<handler index>".

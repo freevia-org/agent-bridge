@@ -21,16 +21,15 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { spawn, execFileSync } from "node:child_process";
 import * as store from "./store.js";
+import { SELF } from "./self.js";
 
 export const NUDGE_PREFIX = "[agent-bridge nudge]";
 const NUDGE_EVERY_MS = 60_000;
 // The app starts a queued turn within ~7 s when it has the thread loaded.
 const FALLBACK_MS = 15_000;
 const SESSION_MAX_AGE_MS = 7 * 24 * 3600_000;
-const CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "agent-bridge.js");
 
 const nudgeText = (from) =>
   `${NUDGE_PREFIX} New message from ${from}; it is attached below. Handle it, replying with the agent-bridge reply tool if needed.`;
@@ -49,7 +48,7 @@ export function wakeIfIdle(recipient, from) {
     const nudgedAt = new Date().toISOString();
     detached(codex, ["queue", "--thread", s.sessionId, "--message", nudgeText(from)]);
     store.updateSession(recipient, { nudgedAt });
-    detached(process.execPath, [CLI, "wake-check", "--name", recipient, "--nudged", nudgedAt, "--from", from]);
+    detached(SELF[0], [...SELF.slice(1), "wake-check", "--name", recipient, "--nudged", nudgedAt, "--from", from]);
     return true;
   } catch {
     return false;

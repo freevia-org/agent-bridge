@@ -6,7 +6,35 @@ answer, and receive mail without polling.
 
 Zero dependencies. Needs Node 18+. Works on Windows, macOS and Linux.
 
-## Setup (one command per machine)
+## Setup
+
+### Easiest: download one file
+
+Download the file for your machine from the
+[latest release](https://github.com/tony-xmelon/agent-bridge/releases/latest):
+
+| Machine | File |
+|---|---|
+| Windows | `agent-bridge-windows-x64.exe` |
+| Mac (Apple Silicon) | `agent-bridge-macos-arm64` |
+| Mac (Intel) | `agent-bridge-macos-x64` |
+| Linux | `agent-bridge-linux-x64` |
+
+**Windows:** double-click it. **Mac/Linux:** run it from a terminal (`chmod +x` it first).
+
+It has Node built in, so it needs nothing else installed. It copies itself to
+`~/.agent-bridge/bin`, sets everything up, and waits while you click **Trust**
+in Codex. Afterwards you can delete the downloaded file. To update, download the
+new release and run it the same way; that also works while Codex and Claude are
+using the old version.
+
+The files are unsigned:
+- **Windows:** SmartScreen may say "Windows protected your PC". Click
+  **More info → Run anyway**.
+- **Mac:** remove the quarantine flag first:
+  `xattr -d com.apple.quarantine agent-bridge-macos-*`.
+
+### Alternative: from the source (needs Git)
 
 **Windows** (PowerShell):
 
@@ -103,8 +131,14 @@ agent-bridge thread <thread-id>
 Data lives in `~/.agent-bridge` (override with `AGENT_BRIDGE_HOME`). Messages
 are kept for 30 days. Hook activity is logged to `~/.agent-bridge/hook.log`.
 
-## Test
+## Test and build
 
 ```bash
-npm test
+npm test                 # smoke test against the source
+npm install && npm run build:exe   # standalone executable for this platform, in dist/
+AGENT_BRIDGE_EXE=dist/agent-bridge-<os>-<arch> npm test   # same test against the executable
 ```
+
+Releases: push a tag like `v0.2.0`. The `release` workflow builds and tests the
+executable on Windows, macOS (arm64 and x64) and Linux, then attaches them to
+the GitHub release.

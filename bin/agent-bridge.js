@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import * as store from "../src/store.js";
+import { IS_EXE } from "../src/self.js";
 
 const USAGE = `agent-bridge: let Claude Code and Codex sessions message each other.
 
@@ -45,7 +46,17 @@ const needKind = () => {
   if (!store.KINDS.includes(kind)) throw new Error(`--kind must be one of ${store.KINDS.join(", ")}`);
 };
 
-try {
+// A function rather than top-level await: the standalone executable is a
+// CommonJS bundle, which has no top-level await.
+async function main() {
+  // Double-clicking the executable (no arguments) runs setup, then keeps the
+  // window open so the result can be read.
+  if (!cmd && IS_EXE) {
+    const { setup } = await import("../src/setup.js");
+    await setup({ wait: true });
+    await pressEnter();
+    return;
+  }
   switch (cmd) {
     case "mcp": {
       needKind();
@@ -133,9 +144,18 @@ try {
       console.log(USAGE);
       process.exit(cmd && cmd !== "help" && cmd !== "--help" ? 1 : 0);
   }
-} catch (e) {
+}
+
+main().catch(async (e) => {
   console.error(`agent-bridge: ${e.message}`);
+  if (!cmd && IS_EXE) await pressEnter();
   process.exit(1);
+});
+
+function pressEnter() {
+  if (!process.stdin.isTTY) return Promise.resolve();
+  process.stdout.write("\nPress Enter to close.");
+  return new Promise((r) => process.stdin.once("data", r)).then(() => process.stdin.pause());
 }
 
 function stdinText() {

@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { SELF } from "./self.js";
 import * as store from "./store.js";
 import { NUDGE_PREFIX } from "./wake.js";
 
@@ -86,9 +86,9 @@ function respond(event, kind, input, names) {
     if (kind === "claude") {
       // Claude Code can't be poked from outside, but its Monitor tool wakes the
       // session on each line a background command prints.
-      const cli = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "agent-bridge.js").replace(/\\/g, "/");
+      const self = SELF.map((p) => `"${p.replace(/\\/g, "/")}"`).join(" ");
       lines.push(
-        `When you expect replies, or the user asks you to stay reachable, run \`"${process.execPath.replace(/\\/g, "/")}" "${cli}" watch --as ${names[0]}\` with the Monitor tool (persistent) so messages wake you while idle.`
+        `When you expect replies, or the user asks you to stay reachable, run \`${self} watch --as ${names[0]}\` with the Monitor tool (persistent) so messages wake you while idle.`
       );
     }
     if (waiting) lines.push(`${waiting} message(s) from other agents are waiting; they are attached to the prompt below.`);

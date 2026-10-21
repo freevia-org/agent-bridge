@@ -8,13 +8,15 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 const CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "agent-bridge.js");
+// AGENT_BRIDGE_EXE=path/to/agent-bridge.exe runs the same checks against the standalone executable.
+const SELF = process.env.AGENT_BRIDGE_EXE ? [process.env.AGENT_BRIDGE_EXE] : [process.execPath, CLI];
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "agent-bridge-test-"));
 const PROJECT = path.join(HOME, "proj");
 fs.mkdirSync(PROJECT);
 const env = { ...process.env, AGENT_BRIDGE_HOME: path.join(HOME, "store") };
 
 function server(kind) {
-  const p = spawn(process.execPath, [CLI, "mcp", "--kind", kind], { cwd: PROJECT, env, stdio: ["pipe", "pipe", "inherit"] });
+  const p = spawn(SELF[0], [...SELF.slice(1), "mcp", "--kind", kind], { cwd: PROJECT, env, stdio: ["pipe", "pipe", "inherit"] });
   let buf = "";
   const pending = new Map();
   let next = 1;
@@ -42,7 +44,7 @@ function server(kind) {
 }
 
 function hook(kind, input) {
-  const r = spawnSync(process.execPath, [CLI, "hook", "--kind", kind], { cwd: PROJECT, env, input: JSON.stringify(input) });
+  const r = spawnSync(SELF[0], [...SELF.slice(1), "hook", "--kind", kind], { cwd: PROJECT, env, input: JSON.stringify(input) });
   return r.stdout.toString() ? JSON.parse(r.stdout.toString()) : null;
 }
 
@@ -91,7 +93,7 @@ try {
   hook("codex", { hook_event_name: "Stop", session_id: "codex-sess", cwd: PROJECT });
   const fakeCodex = { ...env, AGENT_BRIDGE_CODEX: process.execPath }; // stand-in binary; the queue call just fails
   const sendCli = () =>
-    spawnSync(process.execPath, [CLI, "send", "--from", "claude@proj", "--to", "codex@proj", "wake up"], { env: fakeCodex }).stdout.toString();
+    spawnSync(SELF[0], [...SELF.slice(1), "send", "--from", "claude@proj", "--to", "codex@proj", "wake up"], { env: fakeCodex }).stdout.toString();
   assert.match(sendCli(), /nudged idle session/);
   assert.doesNotMatch(sendCli(), /nudged/);
   // The nudge counts toward the auto-turn limit rather than resetting it.
@@ -119,7 +121,7 @@ try {
   assert.equal(hook("codex", { hook_event_name: "UserPromptSubmit", session_id: "codex-sess", cwd: PROJECT, transcript_path: "x", prompt: "[agent-bridge nudge] x" }), null);
 
   // A linked name reaches its thread even though the folder name differs.
-  spawnSync(process.execPath, [CLI, "link", "--codex-thread", "linked-sess", "--cwd", PROJECT, "--name", "codex@nickname"], { env });
+  spawnSync(SELF[0], [...SELF.slice(1), "link", "--codex-thread", "linked-sess", "--cwd", PROJECT, "--name", "codex@nickname"], { env });
   await claude.call("send", { to: "codex@nickname", body: "via link" });
   const linkedOut = hook("codex", { hook_event_name: "UserPromptSubmit", session_id: "linked-sess", cwd: PROJECT, transcript_path: "x" });
   assert.match(linkedOut.hookSpecificOutput.additionalContext, /via link/);
