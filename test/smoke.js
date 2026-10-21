@@ -97,6 +97,10 @@ try {
   // The nudge counts toward the auto-turn limit rather than resetting it.
   const nudge = hook("codex", { hook_event_name: "UserPromptSubmit", session_id: "codex-sess", cwd: PROJECT, prompt: "[agent-bridge nudge] hi" });
   assert.match(nudge.hookSpecificOutput.additionalContext, /wake up/);
+  // Once that nudged turn has ended, a follow-up nudges again straight away.
+  hook("codex", { hook_event_name: "Stop", session_id: "codex-sess", cwd: PROJECT });
+  assert.match(sendCli(), /nudged idle session/);
+  hook("codex", { hook_event_name: "UserPromptSubmit", session_id: "codex-sess", cwd: PROJECT, prompt: "[agent-bridge nudge] hi" });
 
   // Codex's throwaway forks (no transcript) neither get mail nor take over the name.
   await claude.call("send", { to: "codex@proj", body: "not for forks" });

@@ -20,7 +20,10 @@ export function wakeIfIdle(recipient, from) {
     const s = store.getSession(recipient);
     if (!s || s.kind !== "codex" || !s.idle || !s.sessionId) return false;
     if (Date.now() - Date.parse(s.at) > SESSION_MAX_AGE_MS) return false;
-    if (s.nudgedAt && Date.now() - Date.parse(s.nudgedAt) < NUDGE_EVERY_MS) return false;
+    // Hold off only while an earlier nudge is still pending: once the session
+    // has run hooks since that nudge (s.at moved past it), nudge right away.
+    const pending = s.nudgedAt && Date.parse(s.nudgedAt) >= Date.parse(s.at);
+    if (pending && Date.now() - Date.parse(s.nudgedAt) < NUDGE_EVERY_MS) return false;
     const codex = findCodex();
     if (!codex) return false;
     const message = `${NUDGE_PREFIX} New message from ${from}; it is attached below. Handle it, replying with the agent-bridge reply tool if needed.`;
