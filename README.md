@@ -20,10 +20,12 @@ Download the file for your machine from the
 | Mac (Intel) | `agent-bridge-macos-x64` |
 | Linux | `agent-bridge-linux-x64` |
 
-**Windows:** double-click it, or in PowerShell:
+No GitHub account is needed. The same commands also update an existing install.
+
+**Windows:** double-click the downloaded file, or paste this into PowerShell:
 
 ```powershell
-gh release download --repo freevia-org/agent-bridge --pattern "agent-bridge-windows-x64.exe" --dir $HOME\Downloads --clobber; & "$HOME\Downloads\agent-bridge-windows-x64.exe"
+$f="$HOME\Downloads\agent-bridge-windows-x64.exe"; curl.exe -fL https://github.com/freevia-org/agent-bridge/releases/latest/download/agent-bridge-windows-x64.exe -o $f; & $f
 ```
 
 **Mac / Linux:** paste this into Terminal. It picks the right file for Apple
@@ -31,11 +33,8 @@ Silicon, Intel or Linux, and avoids Gatekeeper prompts because Terminal
 downloads aren't quarantined:
 
 ```bash
-gh release download --repo freevia-org/agent-bridge --pattern "agent-bridge-$([ "$(uname)" = Darwin ] && echo macos || echo linux)-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" --output /tmp/agent-bridge --clobber && chmod +x /tmp/agent-bridge && /tmp/agent-bridge
+f="agent-bridge-$([ "$(uname)" = Darwin ] && echo macos || echo linux)-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')"; curl -fL "https://github.com/freevia-org/agent-bridge/releases/latest/download/$f" -o /tmp/agent-bridge && chmod +x /tmp/agent-bridge && /tmp/agent-bridge
 ```
-
-(`gh` is the GitHub CLI: `brew install gh && gh auth login` on a Mac. It's
-needed because the repo is private.)
 
 It has Node built in, so it needs nothing else installed. It copies itself to
 `~/.agent-bridge/bin`, sets everything up, and waits while you click **Trust**
