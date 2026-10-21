@@ -51,10 +51,11 @@ function shellPath(p) {
   const out = path.join(folder, path.basename(p)).replace(/\\/g, "/");
   return /\s/.test(out) ? `"${out}"` : out;
 }
-const hookCommand = (kind) => `${shellPath(process.execPath)} ${shellPath(CLI)} hook --kind ${kind}`;
+export const hookCommand = (kind) => `${shellPath(process.execPath)} ${shellPath(CLI)} hook --kind ${kind}`;
 
 export function install({ claude = true, codex = true, dryRun = false } = {}) {
   const log = [];
+  const oldCodexHooks = readJson(codexHooks());
   if (claude) {
     editJson(claudeJson(), dryRun, log, (cfg) => {
       cfg.mcpServers ??= {};
@@ -78,7 +79,7 @@ export function install({ claude = true, codex = true, dryRun = false } = {}) {
         `default_tools_approval_mode = "approve"`,
         ``,
       ].join("\n");
-      return `${removeTomlTable(toml).trimEnd()}\n\n${block}`;
+      return upsertTomlTable(toml, block);
     });
     editJson(codexHooks(), dryRun, log, (cfg) => setHooks(cfg, "codex"));
   }
@@ -87,7 +88,16 @@ export function install({ claude = true, codex = true, dryRun = false } = {}) {
   const hooksChanged = log.some((l) => l.startsWith("edited") && /hooks\.json|settings\.json/.test(l));
   if (!dryRun && (hooksChanged || !fs.existsSync(installRecord()))) {
     fs.mkdirSync(store.home(), { recursive: true });
-    fs.writeFileSync(installRecord(), JSON.stringify({ installedAt: new Date().toISOString(), cli: CLI, node: process.execPath }, null, 2));
+    // Changing hooks.json leaves Codex's old trusted_hash entries in place but
+    // void. Remember them, so only a fresh approval counts (codexApproval).
+    // Codex approves each hook separately, so snapshot only the hooks whose
+    // definition actually changed.
+    const toml = readText(codexConfig());
+    const trustAtInstall = { ...(readJson(installRecord())?.trustAtInstall || {}) };
+    for (const k of codexTrustKeys(readJson(codexHooks()))) {
+      if (canonical(handlerAt(oldCodexHooks, k.key)) !== canonical(handlerAt(readJson(codexHooks()), k.key))) trustAtInstall[k.key] = trustedHash(toml, k.key);
+    }
+    fs.writeFileSync(installRecord(), JSON.stringify({ installedAt: new Date().toISOString(), cli: CLI, node: process.execPath, trustAtInstall }, null, 2));
   }
   return log;
 }
@@ -113,6 +123,8 @@ export function uninstall({ dryRun = false } = {}) {
 export function doctor() {
   const checks = [];
   const add = (ok, label, fix) => checks.push({ ok: !!ok, label, fix: ok ? undefined : fix });
+  // Progress worth showing that needs no action, e.g. hooks not run *yet*.
+  const info = (label) => checks.push({ ok: true, info: true, label });
   const read = (f) => { try { return fs.readFileSync(f, "utf8"); } catch { return ""; } };
   const json = (f) => { try { return JSON.parse(read(f)); } catch { return null; } };
   const rec = json(installRecord());
@@ -127,30 +139,39 @@ export function doctor() {
   add(cMcp?.args?.[0] === CLI, "Claude Code: MCP server registered", reinstall);
   add(hooksCurrent(json(claudeSettings()), "claude"), "Claude Code: hooks installed and current", reinstall);
   const cRun = lastHook("claude");
-  add(cRun, `Claude Code: hooks have run since install${cRun ? ` (last ${cRun})` : ""}`,
-    "Send any prompt in Claude Code. (Hooks apply to open sessions; the MCP tools only appear in sessions started after install.)");
+  info(`Claude Code: hooks have run since install${cRun ? ` (last ${cRun})` : ": not yet (they run on the next Claude prompt)"}`);
 
   // Codex
   const toml = read(codexConfig());
   add(toml.includes(`[mcp_servers.${SERVER}]`) && toml.includes(CLI), "Codex: MCP server registered", reinstall);
-  const hooksCfg = json(codexHooks());
-  add(hooksCurrent(hooksCfg, "codex"), "Codex: hooks installed and current", reinstall);
-  const untrusted = codexTrustKeys(hooksCfg).filter((k) => !trustedInToml(toml, k.key)).map((k) => k.event);
-  add(!untrusted.length, `Codex: approval recorded in Settings > Hooks${untrusted.length ? ` (missing: ${untrusted.join(", ")})` : " (confirmed once the hooks have run)"}`,
-    `Open Codex > Settings > Hooks, find the three "agent-bridge: ..." hooks and trust them. Codex never runs hooks nobody has reviewed.`);
+  add(hooksCurrent(json(codexHooks()), "codex"), "Codex: hooks installed and current", reinstall);
+  const { missing } = codexApproval();
+  add(!missing.length, `Codex: hooks approved${missing.length ? ` (missing: ${missing.join(", ")})` : ""}`,
+    `In the Codex app, click "Trust" when it asks you to review hooks, or open Settings > Hooks and trust the three "agent-bridge: ..." hooks.`);
   const xRun = lastHook("codex");
-  add(xRun, `Codex: hooks have run since install${xRun ? ` (last ${xRun})` : ""}`,
-    untrusted.length
-      ? "After trusting the hooks, send any prompt in a Codex session."
-      : `Send any prompt in a Codex session. If Settings > Hooks still says a hook "needs review", trust it again (editing hooks.json invalidates earlier approval).`);
+  info(`Codex: hooks have run since install${xRun ? ` (last ${xRun})` : ": not yet (they run on the next Codex prompt)"}`);
   add(findCodex(), "Codex: CLI found (used to wake idle Codex sessions)",
     "Set AGENT_BRIDGE_CODEX to the full path of the codex executable.");
 
   return checks;
 }
 
+// Which of our Codex hooks lack a current approval: a trusted_hash that is
+// present and differs from the (void) one recorded when the hooks last changed.
+export function codexApproval() {
+  const toml = readText(codexConfig());
+  const before = readJson(installRecord())?.trustAtInstall || {};
+  const missing = codexTrustKeys(readJson(codexHooks()))
+    .filter((k) => {
+      const h = trustedHash(toml, k.key);
+      return !h || h === before[k.key];
+    })
+    .map((k) => k.event);
+  return { missing };
+}
+
 export function formatDoctor(checks) {
-  const lines = checks.map((c) => `${c.ok ? "  ok " : "  -- "} ${c.label}`);
+  const lines = checks.map((c) => `${c.info ? "  .. " : c.ok ? "  ok " : "  -- "} ${c.label}`);
   const todo = checks.filter((c) => !c.ok);
   if (!todo.length) return `${lines.join("\n")}\n\nAll set. Claude Code and Codex sessions can now message each other.`;
   const steps = [...new Set(todo.map((c) => c.fix))].map((f, i) => `  ${i + 1}. ${f}`);
@@ -174,13 +195,24 @@ function codexTrustKeys(cfg) {
   return keys;
 }
 
-function trustedInToml(toml, key) {
+// The hook handler a Codex trust key ("<file>:<event>:<group>:<handler>") points at.
+function handlerAt(cfg, key) {
+  const [gi, hi] = key.split(":").slice(-2).map(Number);
+  const snake = key.split(":").slice(-3)[0];
+  const ev = Object.keys(HOOKS).find((e) => HOOKS[e].snake === snake);
+  return cfg?.hooks?.[ev]?.[gi]?.hooks?.[hi] ?? null;
+}
+
+function trustedHash(toml, key) {
   const header = new RegExp(`^\\[hooks\\.state\\.(?:'${escapeRe(key)}'|"${escapeRe(key.replace(/\\/g, "\\\\"))}")\\]\\s*$`, "m");
   const m = header.exec(toml);
-  if (!m) return false;
+  if (!m) return null;
   const body = toml.slice(m.index + m[0].length).split(/^\[/m)[0];
-  return /^\s*trusted_hash\s*=/m.test(body);
+  return body.match(/^\s*trusted_hash\s*=\s*["']([^"']+)["']/m)?.[1] || null;
 }
+
+const readText = (f) => { try { return fs.readFileSync(f, "utf8"); } catch { return ""; } };
+const readJson = (f) => { try { return JSON.parse(readText(f)); } catch { return null; } };
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -194,7 +226,7 @@ function lastHookRun(kind, since) {
   const lines = (() => { try { return fs.readFileSync(path.join(store.home(), "hook.log"), "utf8").trim().split("\n"); } catch { return []; } })();
   for (let i = lines.length - 1; i >= 0; i--) {
     const [ts, k] = lines[i].split(" ");
-    if (k === kind && !lines[i].includes("session=?")) return Date.parse(ts) >= since ? ts : null;
+    if (k === kind && !lines[i].includes("session=?") && !lines[i].includes("session=setup-check")) return Date.parse(ts) >= since ? ts : null;
   }
   return null;
 }
@@ -232,8 +264,28 @@ function removeTomlTable(toml) {
   return out.join("\n");
 }
 
+// Puts our table where it already is (so a re-run changes nothing), or at the end.
+function upsertTomlTable(toml, block) {
+  const lines = toml.split(/\r?\n/);
+  const isOurs = (h) => h === `mcp_servers.${SERVER}` || h.startsWith(`mcp_servers.${SERVER}.`);
+  const start = lines.findIndex((l) => isOurs(l.match(/^\s*\[([^\]]+)\]\s*$/)?.[1] || ""));
+  if (start < 0) return `${toml.trimEnd()}\n\n${block}`;
+  let end = start + 1;
+  while (end < lines.length && !(/^\s*\[([^\]]+)\]\s*$/.test(lines[end]) && !isOurs(lines[end].match(/^\s*\[([^\]]+)\]/)[1]))) end++;
+  // Our old table's trailing blank lines are replaced by exactly one; nothing
+  // outside our table is touched.
+  while (end > start + 1 && lines[end - 1].trim() === "") end--;
+  const after = lines.slice(end);
+  while (after.length && after[0].trim() === "") after.shift();
+  return [...lines.slice(0, start), ...block.trimEnd().split("\n"), ...(after.length ? ["", ...after] : [""])].join("\n");
+}
+
 // TOML literal string (no escapes), falling back to a basic string.
 const tomlStr = (s) => (s.includes("'") ? JSON.stringify(s) : `'${s}'`);
+
+// JSON with object keys sorted (arrays keep their order).
+const canonical = (v) =>
+  JSON.stringify(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x));
 
 function backup(file) {
   if (fs.existsSync(file)) fs.copyFileSync(file, `${file}.agent-bridge-backup`);
@@ -244,11 +296,11 @@ function editJson(file, dryRun, log, mutate, { skipMissing = false } = {}) {
   if (!exists && skipMissing) return;
   const before = exists ? fs.readFileSync(file, "utf8") : "{}";
   const cfg = JSON.parse(before || "{}");
-  const original = JSON.stringify(cfg);
+  const original = canonical(cfg);
   mutate(cfg);
   // Compare content, not text: don't rewrite a file (e.g. ~/.claude.json) just
-  // because the app that owns it formats JSON differently.
-  if (exists && JSON.stringify(cfg) === original) return log.push(`unchanged  ${file}`);
+  // because its formatting or key order differs.
+  if (exists && canonical(cfg) === original) return log.push(`unchanged  ${file}`);
   const after = JSON.stringify(cfg, null, 2) + "\n";
   log.push(`${dryRun ? "would edit" : "edited"}  ${file}`);
   if (dryRun) return;

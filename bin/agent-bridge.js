@@ -3,7 +3,8 @@ import * as store from "../src/store.js";
 
 const USAGE = `agent-bridge: let Claude Code and Codex sessions message each other.
 
-  agent-bridge install [--claude-only|--codex-only] [--dry-run]   register MCP server + hooks
+  agent-bridge setup [--no-wait] [--no-update]                    everything: update, install, link threads, verify, wait for approval
+  agent-bridge install [--claude-only|--codex-only] [--dry-run]   register MCP server + hooks only
   agent-bridge uninstall [--dry-run]                              remove them again
   agent-bridge doctor                                             check setup step by step, print what is left to do
   agent-bridge status                                             machine-readable install state + known agents
@@ -28,7 +29,7 @@ function parse(argv) {
     if (a.startsWith("--")) {
       const key = a.slice(2);
       const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith("--") && !["dry-run", "peek", "claude-only", "codex-only", "json"].includes(key)) {
+      if (next !== undefined && !next.startsWith("--") && !["dry-run", "peek", "claude-only", "codex-only", "json", "no-wait", "no-update"].includes(key)) {
         flags[key] = next;
         i++;
       } else flags[key] = true;
@@ -79,6 +80,11 @@ try {
           : inst.uninstall({ dryRun: !!flags["dry-run"] });
       console.log(log.join("\n"));
       if (cmd === "install" && !flags["dry-run"]) console.log(`\nSetup check:\n${inst.formatDoctor(inst.doctor())}`);
+      break;
+    }
+    case "setup": {
+      const { setup } = await import("../src/setup.js");
+      await setup({ wait: !flags["no-wait"] && process.stdin.isTTY !== false, update: !flags["no-update"] });
       break;
     }
     case "doctor": {

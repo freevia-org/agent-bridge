@@ -6,28 +6,39 @@ answer, and receive mail without polling.
 
 Zero dependencies. Needs Node 18+. Works on Windows, macOS and Linux.
 
-## Install (once per machine)
+## Setup (one command per machine)
 
-```bash
-git clone https://github.com/tony-xmelon/agent-bridge.git ~/agent-bridge
-node ~/agent-bridge/bin/agent-bridge.js install
+**Windows** (PowerShell):
+
+```powershell
+$d="$HOME\.agent-bridge\app"; if (!(Test-Path $d)) { git clone https://github.com/tony-xmelon/agent-bridge.git $d }; powershell -ExecutionPolicy Bypass -File "$d\setup.ps1"
 ```
 
-`install` ends with a setup check that lists what's left. Run it again at any
-time:
+**macOS / Linux**:
 
 ```bash
-node ~/agent-bridge/bin/agent-bridge.js doctor
+d="$HOME/.agent-bridge/app"; [ -d "$d" ] || git clone https://github.com/tony-xmelon/agent-bridge.git "$d"; sh "$d/setup.sh"
 ```
 
-The one manual step is in Codex. Open **Settings → Hooks** and trust the three
-hooks titled `agent-bridge: …`. Codex never runs hooks nobody has reviewed, and
-any change to them (for example a reinstall from a different folder) needs a new
-approval. The installer deliberately doesn't approve them for you. Start a new
-Claude Code session to get the MCP tools; hooks apply to open sessions straight
-away.
+The command needs Git and access to this repo. Setup does the rest:
 
-`install` is idempotent and backs up every file before editing it
+1. Installs Node.js if it's missing (winget or Homebrew).
+2. Updates the checkout (`git pull`).
+3. Registers the MCP server and hooks with Claude Code and Codex.
+4. Registers your recent Codex app threads, so they can be messaged right away.
+5. Runs the hook commands in the shells the apps use, to prove they work.
+6. Waits for the one click only you can do: in the Codex app, click **Trust**
+   when it asks you to review hooks, or approve the three `agent-bridge: …`
+   hooks in **Settings → Hooks**. Codex never runs hooks nobody has reviewed,
+   so setup deliberately doesn't approve them for you.
+7. Prints a final check.
+
+Run the same command again to update. If nothing changed, it changes nothing,
+and your Codex approval stays valid. New Claude Code sessions get the MCP tools;
+already-open sessions only get the hooks. `agent-bridge doctor` re-runs the
+final check at any time.
+
+Setup is idempotent and backs up every file before editing it
 (`*.agent-bridge-backup`):
 
 | File | What gets added |
@@ -37,7 +48,9 @@ away.
 | `~/.codex/config.toml` | `[mcp_servers.agent-bridge]` (900 s tool timeout for long waits) |
 | `~/.codex/hooks.json` | the same three hooks |
 
-The installer writes absolute paths. If you move the folder, run `install` again.
+The installer writes absolute paths. If you move the folder, run setup again.
+`agent-bridge link --codex-thread <id> [--name codex@x]` registers any other
+existing Codex thread.
 `agent-bridge uninstall` removes everything it added. `--claude-only` and
 `--codex-only` limit the install to one side.
 
