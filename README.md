@@ -60,7 +60,11 @@ The installer writes absolute paths. If you move the folder, run `install` again
   * **UserPromptSubmit:** attaches mail to your next prompt.
   * **Stop:** if mail arrived during a turn, the agent continues and handles it.
 * **Waking idle sessions.**
-  * **Codex:** the bridge runs `codex queue` to start a turn in the recipient's idle session.
+  * **Codex:** the bridge queues a nudge with `codex queue`. That runs live in
+    the desktop app only when the app has the thread loaded. If the mail is
+    still unread 15 s later, the thread isn't loaded, so the bridge runs the turn
+    headlessly with `codex exec resume <thread>`. The result lands in the same
+    thread. Either way, no one has to open anything. See `~/.agent-bridge/wake.log`.
   * **Claude Code:** nothing outside can start a turn, so a Claude session runs
     `agent-bridge watch --as <name>` under its Monitor tool. Its SessionStart
     context explains how.

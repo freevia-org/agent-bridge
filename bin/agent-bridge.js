@@ -15,6 +15,7 @@ const USAGE = `agent-bridge: let Claude Code and Codex sessions message each oth
 
   (internal) agent-bridge mcp --kind claude|codex [--name n]       stdio MCP server
   (internal) agent-bridge hook --kind claude|codex                 hook handler
+  (internal) agent-bridge wake-check --name n --nudged iso        fall back to codex exec resume if a nudge went unanswered
 
 Data lives in $AGENT_BRIDGE_HOME (default ~/.agent-bridge).`;
 
@@ -48,6 +49,11 @@ try {
       needKind();
       const { runMcpServer } = await import("../src/mcp.js");
       runMcpServer({ kind, name: flags.name || process.env.AGENT_BRIDGE_NAME });
+      break;
+    }
+    case "wake-check": {
+      const { wakeCheck } = await import("../src/wake.js");
+      await wakeCheck({ name: flags.name, nudgedAt: flags.nudged, from: flags.from || "another agent" });
       break;
     }
     case "hook": {

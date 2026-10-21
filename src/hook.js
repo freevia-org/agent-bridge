@@ -76,7 +76,9 @@ function handle(kind, input) {
 function respond(event, kind, input, names) {
   if (event === "SessionStart") {
     const peers = store.listAgents({ includeOffline: false }).filter((a) => !names.includes(a.name));
-    const mail = store.takeUnread(names);
+    // Only announce waiting mail here; UserPromptSubmit (which always follows)
+    // delivers it, so a nudge prompt can tell a stale nudge from a live one.
+    const waiting = store.peekUnread(names).length;
     const lines = [
       `[agent-bridge] You are "${names[0]}". Use the agent-bridge MCP tools (send, reply, wait, inbox, agents) to talk to other agent sessions on this machine.`,
       peers.length ? `Online now: ${peers.map((p) => p.name).join(", ")}.` : "No other agents are online right now.",
@@ -89,7 +91,7 @@ function respond(event, kind, input, names) {
         `When you expect replies, or the user asks you to stay reachable, run \`"${process.execPath.replace(/\\/g, "/")}" "${cli}" watch --as ${names[0]}\` with the Monitor tool (persistent) so messages wake you while idle.`
       );
     }
-    if (mail.length) lines.push(`Messages waiting for you:\n\n${store.formatMessages(mail)}`);
+    if (waiting) lines.push(`${waiting} message(s) from other agents are waiting; they are attached to the prompt below.`);
     return context(event, lines.join("\n"));
   }
 
@@ -102,8 +104,18 @@ function respond(event, kind, input, names) {
       return context(event, `[agent-bridge] ${MAX_AUTO_TURNS} automatic turns have run without the user. Do not reply to agents again until the user speaks.`);
     }
     const mail = store.takeUnread(names);
-    if (!mail.length) return null;
-    return context(event, `[agent-bridge] Messages from other agents arrived:\n\n${store.formatMessages(mail)}`);
+    if (mail.length) {
+      store.updateSession(names[0], { deliveredAt: new Date().toISOString() });
+      return context(event, `[agent-bridge] Messages from other agents arrived:\n\n${store.formatMessages(mail)}`);
+    }
+    if (!nudged) return null;
+    // A nudge without mail is a duplicate: `codex exec resume` also drains the
+    // app's queued copy into the same turn, or the app runs it long after the
+    // mail went out another way. Right after a delivery, say nothing (the
+    // agent is handling it); otherwise let the agent know there's nothing new.
+    const s = store.getSession(names[0]);
+    if (s?.sessionId === input.session_id && s.deliveredAt && Date.now() - Date.parse(s.deliveredAt) < 10 * 60_000) return null;
+    return context(event, `[agent-bridge] No new messages came with this nudge; they were already delivered earlier. If nothing else is pending, just stop.`);
   }
 
   if (event === "Stop") {

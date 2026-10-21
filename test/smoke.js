@@ -107,6 +107,17 @@ try {
   assert.equal(hook("codex", { hook_event_name: "Stop", session_id: "fork", cwd: PROJECT, transcript_path: null }), null);
   assert.match(hook("codex", { hook_event_name: "UserPromptSubmit", session_id: "codex-sess", cwd: PROJECT, transcript_path: "x" }).hookSpecificOutput.additionalContext, /not for forks/);
 
+  // A resumed session: SessionStart only announces, the nudge prompt delivers.
+  hook("codex", { hook_event_name: "Stop", session_id: "codex-sess", cwd: PROJECT, transcript_path: "x" });
+  await claude.call("send", { to: "codex@proj", body: "after resume" });
+  const start = hook("codex", { hook_event_name: "SessionStart", session_id: "codex-sess", cwd: PROJECT, transcript_path: "x" });
+  assert.match(start.hookSpecificOutput.additionalContext, /1 message\(s\) .* waiting/);
+  const prompt = hook("codex", { hook_event_name: "UserPromptSubmit", session_id: "codex-sess", cwd: PROJECT, transcript_path: "x", prompt: "[agent-bridge nudge] x" });
+  assert.match(prompt.hookSpecificOutput.additionalContext, /after resume/);
+  // A duplicate nudge right after the delivery (exec resume drains the app's
+  // queued copy into the same turn) must not add anything.
+  assert.equal(hook("codex", { hook_event_name: "UserPromptSubmit", session_id: "codex-sess", cwd: PROJECT, transcript_path: "x", prompt: "[agent-bridge nudge] x" }), null);
+
   // Threads keep both directions.
   const thread = (await claude.call("send", { to: "codex", body: "t1" })).sent.thread;
   assert.match(await claude.call("thread", { thread }), /t1/);
