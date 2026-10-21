@@ -1,26 +1,26 @@
 {
-    "name":  "agent-bridge",
-    "version":  "0.2.0",
-    "description":  "Local mailbox that lets Claude Code and Codex sessions message each other (MCP server + hooks, zero dependencies).",
-    "type":  "module",
-    "bin":  {
-                "agent-bridge":  "bin/agent-bridge.js"
-            },
-    "files":  [
-                  "bin",
-                  "src",
-                  "README.md"
-              ],
-    "engines":  {
-                    "node":  "\u003e=18"
-                },
-    "scripts":  {
-                    "test":  "node test/smoke.js",
-                    "build:exe":  "node scripts/build-exe.mjs"
-                },
-    "license":  "MIT",
-    "devDependencies":  {
-                            "esbuild":  "^0.28.2",
-                            "postject":  "^1.0.0-alpha.6"
-                        }
+    "name": "agent-bridge",
+    "version": "0.2.1",
+    "description": "Local mailbox that lets Claude Code and Codex sessions message each other (MCP server + hooks, zero dependencies).",
+    "type": "module",
+    "bin": {
+        "agent-bridge": "bin/agent-bridge.js"
+    },
+    "files": [
+        "bin",
+        "src",
+        "README.md"
+    ],
+    "engines": {
+        "node": ">=18"
+    },
+    "scripts": {
+        "test": "node test/smoke.js",
+        "build:exe": "node scripts/build-exe.mjs"
+    },
+    "license": "MIT",
+    "devDependencies": {
+        "esbuild": "^0.28.2",
+        "postject": "^1.0.0-alpha.6"
+    }
 }
