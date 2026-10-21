@@ -16,7 +16,9 @@ import * as store from "./store.js";
 import { findCodex } from "./wake.js";
 
 const SERVER = "agent-bridge";
-const MARK = "agent-bridge";
+// Recognises our hook commands, including ones written by older versions
+// whose script path was shortened to "AGENT-~1.JS".
+const isOurHook = (h) => /agent-bridge|agent-~\d|\shook --kind (claude|codex)\s*$/i.test(String(h?.command || ""));
 // Shown as the hook's title in Codex Settings > Hooks (instead of "Hook 1").
 const HOOKS = {
   SessionStart: { snake: "session_start", title: "agent-bridge: introduce this session to other agents and deliver waiting messages" },
@@ -36,15 +38,17 @@ const installRecord = () => path.join(store.home(), "install.json");
 // Claude Code uses Git Bash), and a quoted exe path means different things in
 // each. On Windows we therefore emit 8.3 short paths with forward slashes and
 // no quotes, which cmd, PowerShell and bash all execute the same way.
+// Only the folder part is shortened: the file name must stay as it is, since
+// Node rejects "AGENT-~1.JS" and the name is how we recognise our own hooks.
 function shellPath(p) {
   if (process.platform !== "win32") return /[\s'"$`\\]/.test(p) ? `'${p.replace(/'/g, `'\\''`)}'` : p;
-  let out = p;
-  if (/\s/.test(p)) {
+  let folder = path.dirname(p);
+  if (/\s/.test(folder)) {
     try {
-      out = execSync(`for %I in ("${p}") do @echo %~sI`, { shell: "cmd.exe", encoding: "utf8" }).trim();
+      folder = execSync(`for %I in ("${folder}") do @echo %~sI`, { shell: "cmd.exe", encoding: "utf8" }).trim();
     } catch {}
   }
-  out = out.replace(/\\/g, "/");
+  const out = path.join(folder, path.basename(p)).replace(/\\/g, "/");
   return /\s/.test(out) ? `"${out}"` : out;
 }
 const hookCommand = (kind) => `${shellPath(process.execPath)} ${shellPath(CLI)} hook --kind ${kind}`;
@@ -78,7 +82,10 @@ export function install({ claude = true, codex = true, dryRun = false } = {}) {
     });
     editJson(codexHooks(), dryRun, log, (cfg) => setHooks(cfg, "codex"));
   }
-  if (!dryRun) {
+  // doctor's "hooks have run since install" counts from the last time the hook
+  // config actually changed, so a no-op reinstall doesn't reset it.
+  const hooksChanged = log.some((l) => l.startsWith("edited") && /hooks\.json|settings\.json/.test(l));
+  if (!dryRun && (hooksChanged || !fs.existsSync(installRecord()))) {
     fs.mkdirSync(store.home(), { recursive: true });
     fs.writeFileSync(installRecord(), JSON.stringify({ installedAt: new Date().toISOString(), cli: CLI, node: process.execPath }, null, 2));
   }
@@ -160,7 +167,7 @@ function codexTrustKeys(cfg) {
   for (const [ev, { snake }] of Object.entries(HOOKS)) {
     (cfg?.hooks?.[ev] || []).forEach((g, gi) =>
       (g.hooks || []).forEach((h, hi) => {
-        if (String(h.command || "").includes(MARK)) keys.push({ event: ev, key: `${codexHooks()}:${snake}:${gi}:${hi}` });
+        if (isOurHook(h)) keys.push({ event: ev, key: `${codexHooks()}:${snake}:${gi}:${hi}` });
       })
     );
   }
@@ -206,7 +213,7 @@ function clearHooks(cfg) {
   for (const ev of Object.keys(cfg.hooks)) {
     if (!Array.isArray(cfg.hooks[ev])) continue;
     cfg.hooks[ev] = cfg.hooks[ev]
-      .map((g) => ({ ...g, hooks: (g.hooks || []).filter((h) => !String(h.command || "").includes(MARK)) }))
+      .map((g) => ({ ...g, hooks: (g.hooks || []).filter((h) => !isOurHook(h)) }))
       .filter((g) => g.hooks.length);
     if (!cfg.hooks[ev].length) delete cfg.hooks[ev];
   }
@@ -237,9 +244,12 @@ function editJson(file, dryRun, log, mutate, { skipMissing = false } = {}) {
   if (!exists && skipMissing) return;
   const before = exists ? fs.readFileSync(file, "utf8") : "{}";
   const cfg = JSON.parse(before || "{}");
+  const original = JSON.stringify(cfg);
   mutate(cfg);
+  // Compare content, not text: don't rewrite a file (e.g. ~/.claude.json) just
+  // because the app that owns it formats JSON differently.
+  if (exists && JSON.stringify(cfg) === original) return log.push(`unchanged  ${file}`);
   const after = JSON.stringify(cfg, null, 2) + "\n";
-  if (after === before) return log.push(`unchanged  ${file}`);
   log.push(`${dryRun ? "would edit" : "edited"}  ${file}`);
   if (dryRun) return;
   backup(file);
