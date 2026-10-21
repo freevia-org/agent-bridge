@@ -32,7 +32,8 @@ const FALLBACK_MS = 15_000;
 const SESSION_MAX_AGE_MS = 7 * 24 * 3600_000;
 
 const nudgeText = (from) =>
-  `${NUDGE_PREFIX} New message from ${from}; it is attached below. Handle it, replying with the agent-bridge reply tool if needed.`;
+  // Hooks attach the message; if they aren't approved yet, the inbox tool still works.
+  `${NUDGE_PREFIX} New message from ${from}; it is attached below (if not, read it with the agent-bridge inbox tool). Handle it, replying with the agent-bridge reply tool if needed.`;
 
 export function wakeIfIdle(recipient, from) {
   try {
