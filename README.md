@@ -154,6 +154,10 @@ npm install && npm run build:exe   # standalone executable for this platform, in
 AGENT_BRIDGE_EXE=dist/agent-bridge-<os>-<arch> npm test   # same tests against the executable
 ```
 
+Building needs an official Node.js 20+ build (24 matches CI). Homebrew's
+`node` has single-executable support disabled, so on a Mac use the nodejs.org
+download instead.
+
 Releases: push a tag like `v0.2.0`. The `release` workflow builds and tests the
 executable on Windows, macOS (arm64 and x64) and Linux, then attaches them to
 the GitHub release.
