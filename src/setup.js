@@ -117,6 +117,9 @@ export function linkRecentCodexThreads({ days = 30 } = {}) {
     if (/rollout-.*\.jsonl$/.test(p) && st.mtimeMs >= cutoff) files.push({ p, mtime: st.mtimeMs });
   });
   files.sort((a, b) => b.mtime - a.mtime);
+  // Records named "kind@" came from a version that dropped non-Latin folder
+  // names; remove them so the thread is registered under its proper name.
+  for (const s of store.listSessions()) if (s.name.endsWith("@")) store.removeSession(s.name);
   const known = new Set(store.listSessions().map((s) => s.name));
   const linked = [];
   for (const { p } of files) {

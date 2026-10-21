@@ -65,10 +65,14 @@ function listJson(d) {
 }
 
 export function sanitizeName(name) {
+  // Letters and digits in any script are kept, so folders like
+  // "Термопомпа оферти" or "über" stay distinct (they are also valid file names).
   const clean = String(name || "")
+    .normalize("NFC")
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9@._-]+/g, "-")
+    .replace(/[^\p{L}\p{N}@._-]+/gu, "-")
+    .replace(/-*@-*/g, "@")
     .replace(/^-+|-+$/g, "");
   if (!clean) throw new Error("agent name is empty");
   return clean.slice(0, 80);
@@ -76,7 +80,9 @@ export function sanitizeName(name) {
 
 export function defaultName(kind, cwd = process.cwd()) {
   const folder = path.basename(path.resolve(cwd)) || "root";
-  return sanitizeName(`${kind}@${folder}`);
+  const name = sanitizeName(`${kind}@${folder}`);
+  // A folder name with nothing usable (only punctuation) must not yield "kind@".
+  return name.endsWith("@") ? `${name}folder` : name;
 }
 
 export function kindOf(name) {
@@ -183,6 +189,10 @@ export function getSession(name) {
 export function updateSession(name, patch) {
   const s = getSession(name);
   if (s) writeJsonAtomic(dir("sessions", `${name}.json`), { ...s, ...patch });
+}
+
+export function removeSession(name) {
+  try { fs.unlinkSync(dir("sessions", `${name}.json`)); } catch {}
 }
 
 export function listSessions(kind) {

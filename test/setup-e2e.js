@@ -69,11 +69,31 @@ try {
   assert.equal((again.stdout.match(/\bunchanged\b/g) || []).length, 4, again.stdout);
   assert.match(again.stdout, /already approved/);
 
+  // An archived thread in a non-Latin folder can be linked and reached by name.
+  const cyr = path.join(HOME, "projects", "Термопомпа оферти");
+  fs.mkdirSync(cyr, { recursive: true });
+  const arch = path.join(HOME, ".codex", "archived_sessions");
+  fs.mkdirSync(arch, { recursive: true });
+  fs.writeFileSync(
+    path.join(arch, "rollout-2026-10-21T00-00-00-00000000-0000-0000-0000-0000000archd.jsonl"),
+    JSON.stringify({ type: "session_meta", payload: { id: "00000000-0000-0000-0000-0000000archd", cwd: cyr } }) + "\n"
+  );
+  const linked = run(["link", "--codex-thread", "00000000-0000-0000-0000-0000000archd"]);
+  assert.equal(linked.status, 0, linked.stderr + linked.stdout);
+  assert.ok(fs.existsSync(path.join(HOME, ".agent-bridge", "sessions", "codex@термопомпа-оферти.json")), linked.stdout);
+  assert.equal(run(["send", "--from", "claude@test", "--to", "codex@термопомпа-оферти", "здравей"]).status, 0);
+  const hook = run(["hook", "--kind", "codex"], {
+    input: JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "00000000-0000-0000-0000-0000000archd", cwd: cyr, transcript_path: "x" }),
+  });
+  assert.match(JSON.parse(hook.stdout).hookSpecificOutput.additionalContext, /здравей/);
+
   assert.equal(run(["uninstall"]).status, 0);
   for (const f of [".claude.json", ".claude/settings.json", ".codex/config.toml", ".codex/hooks.json"]) {
     assert.doesNotMatch(fs.readFileSync(path.join(HOME, f), "utf8"), /agent-bridge/, `${f} cleaned`);
   }
   console.log(`setup e2e passed (${EXE ? "executable" : "source"}, ${process.platform}-${process.arch})`);
 } finally {
-  fs.rmSync(HOME, { recursive: true, force: true, maxRetries: 5 });
+  // Best effort: the send above starts a detached wake check that runs from
+  // HOME for ~15 s, and Windows won't delete a folder a process is in.
+  try { fs.rmSync(HOME, { recursive: true, force: true, maxRetries: 5 }); } catch {}
 }

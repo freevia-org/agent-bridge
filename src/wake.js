@@ -84,9 +84,11 @@ export async function wakeCheck({ name, nudgedAt, from }) {
 // session_meta record) unless given.
 export function linkCodexThread(threadId, { cwd, name } = {}) {
   if (!cwd) {
-    const root = path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "sessions");
-    const file = findFile(root, (f) => f.endsWith(`${threadId}.jsonl`));
-    if (!file) throw new Error(`no rollout file for thread ${threadId} under ${root}; pass --cwd`);
+    // Archived threads keep their rollout under archived_sessions.
+    const home = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+    const match = (f) => f.endsWith(`${threadId}.jsonl`);
+    const file = findFile(path.join(home, "sessions"), match) || findFile(path.join(home, "archived_sessions"), match);
+    if (!file) throw new Error(`no rollout file for thread ${threadId} under ${home}\\sessions or archived_sessions; pass --cwd`);
     const meta = JSON.parse(fs.readFileSync(file, "utf8").split("\n", 1)[0]);
     cwd = meta?.payload?.cwd;
     if (!cwd) throw new Error(`thread ${threadId} has no cwd in its session_meta; pass --cwd`);
