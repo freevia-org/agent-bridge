@@ -1,6 +1,6 @@
 # One-command setup for Windows. On a new machine, paste this into PowerShell:
 #
-#   $d="$HOME\.agent-bridge\app"; if (!(Test-Path $d)) { git clone https://github.com/tony-xmelon/agent-bridge.git $d }; powershell -ExecutionPolicy Bypass -File "$d\setup.ps1"
+#   $d="$HOME\.agent-bridge\app"; if (!(Test-Path $d)) { git clone https://github.com/freevia-org/agent-bridge.git $d }; powershell -ExecutionPolicy Bypass -File "$d\setup.ps1"
 #
 # Re-running it later updates and re-checks everything.
 

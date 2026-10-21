@@ -11,7 +11,7 @@ Zero dependencies. Needs Node 18+. Works on Windows, macOS and Linux.
 ### Easiest: download one file
 
 Download the file for your machine from the
-[latest release](https://github.com/tony-xmelon/agent-bridge/releases/latest):
+[latest release](https://github.com/freevia-org/agent-bridge/releases/latest):
 
 | Machine | File |
 |---|---|
@@ -23,7 +23,7 @@ Download the file for your machine from the
 **Windows:** double-click it, or in PowerShell:
 
 ```powershell
-gh release download --repo tony-xmelon/agent-bridge --pattern "agent-bridge-windows-x64.exe" --dir $HOME\Downloads --clobber; & "$HOME\Downloads\agent-bridge-windows-x64.exe"
+gh release download --repo freevia-org/agent-bridge --pattern "agent-bridge-windows-x64.exe" --dir $HOME\Downloads --clobber; & "$HOME\Downloads\agent-bridge-windows-x64.exe"
 ```
 
 **Mac / Linux:** paste this into Terminal. It picks the right file for Apple
@@ -31,7 +31,7 @@ Silicon, Intel or Linux, and avoids Gatekeeper prompts because Terminal
 downloads aren't quarantined:
 
 ```bash
-gh release download --repo tony-xmelon/agent-bridge --pattern "agent-bridge-$([ "$(uname)" = Darwin ] && echo macos || echo linux)-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" --output /tmp/agent-bridge --clobber && chmod +x /tmp/agent-bridge && /tmp/agent-bridge
+gh release download --repo freevia-org/agent-bridge --pattern "agent-bridge-$([ "$(uname)" = Darwin ] && echo macos || echo linux)-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" --output /tmp/agent-bridge --clobber && chmod +x /tmp/agent-bridge && /tmp/agent-bridge
 ```
 
 (`gh` is the GitHub CLI: `brew install gh && gh auth login` on a Mac. It's
@@ -55,13 +55,13 @@ The files are unsigned:
 **Windows** (PowerShell):
 
 ```powershell
-$d="$HOME\.agent-bridge\app"; if (!(Test-Path $d)) { git clone https://github.com/tony-xmelon/agent-bridge.git $d }; powershell -ExecutionPolicy Bypass -File "$d\setup.ps1"
+$d="$HOME\.agent-bridge\app"; if (!(Test-Path $d)) { git clone https://github.com/freevia-org/agent-bridge.git $d }; powershell -ExecutionPolicy Bypass -File "$d\setup.ps1"
 ```
 
 **macOS / Linux**:
 
 ```bash
-d="$HOME/.agent-bridge/app"; [ -d "$d" ] || git clone https://github.com/tony-xmelon/agent-bridge.git "$d"; sh "$d/setup.sh"
+d="$HOME/.agent-bridge/app"; [ -d "$d" ] || git clone https://github.com/freevia-org/agent-bridge.git "$d"; sh "$d/setup.sh"
 ```
 
 The command needs Git and access to this repo. Setup does the rest:

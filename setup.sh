@@ -1,7 +1,7 @@
 #!/bin/sh
 # One-command setup for macOS and Linux. On a new machine, paste this into a terminal:
 #
-#   d="$HOME/.agent-bridge/app"; [ -d "$d" ] || git clone https://github.com/tony-xmelon/agent-bridge.git "$d"; sh "$d/setup.sh"
+#   d="$HOME/.agent-bridge/app"; [ -d "$d" ] || git clone https://github.com/freevia-org/agent-bridge.git "$d"; sh "$d/setup.sh"
 #
 # Re-running it later updates and re-checks everything.
 set -e
