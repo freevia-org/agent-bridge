@@ -60,9 +60,10 @@ jobs:
           - os: windows-2025
           - os: ubuntu-24.04
           - os: macos-26            # Apple Silicon -> agent-bridge-macos-arm64
-          - os: macos-26-intel      # native Intel  -> agent-bridge-macos-x64
+          - os: macos-26            # x64 Node under Rosetta -> agent-bridge-macos-x64
+            arch: x64               # (the macos-*-intel pool queued 30+ min in testing)
     runs-on: ${{ matrix.os }}
-    name: build (${{ matrix.os }})
+    name: build (${{ matrix.os }}${{ matrix.arch && format(' {0}', matrix.arch) || '' }})
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -71,10 +72,11 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
+          architecture: ${{ matrix.arch }}
           cache: npm
       - id: node
         shell: bash
-        run: echo "version=$(node -p process.version)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(node -p 'process.version + "-" + process.arch')" >> "$GITHUB_OUTPUT"
       - run: npm ci
       - name: Test (source)
         run: npm test
@@ -96,7 +98,7 @@ jobs:
         if: inputs.upload
         uses: actions/upload-artifact@v7
         with:
-          name: exe-${{ matrix.os }}
+          name: exe-${{ matrix.os }}-${{ matrix.arch || runner.arch }}
           path: dist/agent-bridge-*
           if-no-files-found: error
           retention-days: 7
