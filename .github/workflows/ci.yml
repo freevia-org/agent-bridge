@@ -1,0 +1,102 @@
+# Checks every push to main and every pull request: a quick lint + source-test
+# job on Linux first, then the standalone executable is built and tested on
+# every platform the release ships. release.yml calls this same workflow
+# (with upload: true) before it publishes anything.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+    inputs:
+      upload:
+        description: Upload each built executable as a workflow artifact (used by release.yml).
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # github.workflow is the caller's name under workflow_call, so this never
+  # collides with the release run that called it.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  lint:
+    name: lint + test (source)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Syntax check (node --check)
+        run: git ls-files -z '*.js' '*.mjs' '*.cjs' | xargs -0 -n1 node --check
+      - name: Line endings (LF only, per .gitattributes)
+        run: |
+          if git ls-files -z | xargs -0 grep -lI $'\r' --; then
+            echo "::error::files above contain CRLF line endings"; exit 1
+          fi
+      - name: Test (source)
+        run: npm test
+
+  build:
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+          - os: ubuntu-24.04
+          - os: macos-26            # Apple Silicon -> agent-bridge-macos-arm64
+          - os: macos-26-intel      # native Intel  -> agent-bridge-macos-x64
+    runs-on: ${{ matrix.os }}
+    name: build (${{ matrix.os }})
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - id: node
+        shell: bash
+        run: echo "version=$(node -p process.version)" >> "$GITHUB_OUTPUT"
+      - run: npm ci
+      - name: Test (source)
+        run: npm test
+      # The executable is node + the bundled sources, so it only needs
+      # rebuilding when the exact node version or any input changes.
+      - name: Cache executable
+        id: exe-cache
+        uses: actions/cache@v6
+        with:
+          path: dist
+          key: exe-${{ runner.os }}-${{ runner.arch }}-node${{ steps.node.outputs.version }}-${{ hashFiles('bin/**', 'src/**', 'scripts/build-exe.mjs', 'package-lock.json') }}
+      - name: Build executable
+        if: steps.exe-cache.outputs.cache-hit != 'true'
+        run: npm run build:exe
+      - name: Test (executable)
+        shell: bash
+        run: AGENT_BRIDGE_EXE="$(ls "$PWD"/dist/agent-bridge-*)" npm test
+      - name: Upload executable
+        if: inputs.upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: exe-${{ matrix.os }}
+          path: dist/agent-bridge-*
+          if-no-files-found: error
+          retention-days: 7
