@@ -27,7 +27,7 @@ env:
 jobs:
   lint:
     name: lint + test (source)
-    runs-on: ubuntu-24.04
+    runs-on: agent-bridge-i5-linux
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
@@ -56,10 +56,11 @@ jobs:
         include:
           - os: windows-2025
           - os: ubuntu-24.04
+            runner: agent-bridge-i5-linux
           - os: macos-26            # Apple Silicon -> agent-bridge-macos-arm64
           - os: macos-26            # x64 Node under Rosetta -> agent-bridge-macos-x64
             arch: x64               # (the macos-*-intel pool queued 30+ min in testing)
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner || matrix.os }}
     name: build (${{ matrix.os }}${{ matrix.arch && format(' {0}', matrix.arch) || '' }})
     timeout-minutes: 20
     steps:
