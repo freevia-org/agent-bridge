@@ -26,7 +26,7 @@ jobs:
     # Like before, every platform whose build and tests passed is attached even
     # if another platform failed (the run itself still reports the failure).
     if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') }}
-    runs-on: ubuntu-24.04
+    runs-on: agent-bridge-i5-linux
     timeout-minutes: 10
     permissions:
       contents: write
