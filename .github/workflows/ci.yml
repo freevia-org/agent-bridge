@@ -55,9 +55,11 @@ jobs:
       matrix:
         include:
           - os: windows-2025
+            runner: agent-bridge-i5-windows
           - os: ubuntu-24.04
             runner: agent-bridge-i5-linux
           - os: macos-26            # Apple Silicon -> agent-bridge-macos-arm64
+            runner: agent-bridge-macmini
           - os: macos-26            # x64 Node under Rosetta -> agent-bridge-macos-x64
             arch: x64               # (the macos-*-intel pool queued 30+ min in testing)
     runs-on: ${{ matrix.runner || matrix.os }}
