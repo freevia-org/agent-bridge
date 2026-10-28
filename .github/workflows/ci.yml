@@ -1,13 +1,10 @@
-# Checks every push to main and every pull request: a quick lint + source-test
-# job on Linux first, then the standalone executable is built and tested on
-# every platform the release ships. release.yml calls this same workflow
-# (with upload: true) before it publishes anything.
+# On-demand CI: a quick lint + source-test job on Linux, then the standalone
+# executable is built and tested on every platform the release ships. release.yml
+# calls this same workflow (with upload: true) before it publishes anything.
 name: ci
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
   workflow_call:
     inputs:
       upload:
