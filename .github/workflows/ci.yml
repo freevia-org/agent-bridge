@@ -60,8 +60,9 @@ jobs:
             runner: agent-bridge-i5-linux
           - os: macos-26            # Apple Silicon -> agent-bridge-macos-arm64
             runner: agent-bridge-macmini
-          - os: macos-26            # x64 Node under Rosetta -> agent-bridge-macos-x64
-            arch: x64               # (the macos-*-intel pool queued 30+ min in testing)
+          - os: macos-26            # x64 Node under Rosetta on the local MacMini
+            runner: agent-bridge-macmini
+            arch: x64
     runs-on: ${{ matrix.runner || matrix.os }}
     name: build (${{ matrix.os }}${{ matrix.arch && format(' {0}', matrix.arch) || '' }})
     timeout-minutes: 20
