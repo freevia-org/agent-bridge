@@ -24,6 +24,12 @@ export function home() {
 
 const dir = (...p) => path.join(home(), ...p);
 
+// Mailbox folders are named after agents, but Windows forbids ":" in file
+// names, so it is stored as "~" (which never occurs in a sanitized name).
+const toMailDir = (name) => String(name).replace(/:/g, "~");
+const fromMailDir = (folder) => String(folder).replace(/~/g, ":");
+const mailDir = (name, ...rest) => dir("mail", toMailDir(name), ...rest);
+
 function ensureDir(p) {
   fs.mkdirSync(p, { recursive: true });
   return p;
@@ -64,20 +70,33 @@ function listJson(d) {
   }
 }
 
+// Names look like "claude:agent-bridge@alitop": app, session title, machine.
+// Older "codex@h90" (app@folder) names still resolve, as aliases.
+// Letters and digits in any script are kept, so "Термопомпа оферти" or "über"
+// stay distinct (they are also valid file names).
 export function sanitizeName(name) {
-  // Letters and digits in any script are kept, so folders like
-  // "Термопомпа оферти" or "über" stay distinct (they are also valid file names).
   const clean = String(name || "")
     .normalize("NFC")
     .trim()
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}@._-]+/gu, "-")
-    .replace(/-*@-*/g, "@")
+    .replace(/[^\p{L}\p{N}@:._-]+/gu, "-")
+    .replace(/-*([@:])-*/g, "$1")
     .replace(/^-+|-+$/g, "");
   if (!clean) throw new Error("agent name is empty");
-  return clean.slice(0, 80);
+  return clean.slice(0, 100);
 }
 
+// One component of a name: no "@" or ":" (those separate the parts).
+const part = (s) => sanitizeName(String(s || "").replace(/[@:]/g, " ") || "x").replace(/[@:]/g, "-");
+
+export const machineName = () => part(os.hostname() || "machine");
+
+export function canonicalName(kind, title, cwd = process.cwd()) {
+  const label = String(title || "").trim() || path.basename(path.resolve(cwd)) || "session";
+  return `${kind}:${part(label)}@${machineName()}`;
+}
+
+// The old folder-based name, kept as an alias.
 export function defaultName(kind, cwd = process.cwd()) {
   const folder = path.basename(path.resolve(cwd)) || "root";
   const name = sanitizeName(`${kind}@${folder}`);
@@ -86,7 +105,7 @@ export function defaultName(kind, cwd = process.cwd()) {
 }
 
 export function kindOf(name) {
-  const k = String(name).split("@")[0];
+  const k = String(name).match(/^([a-z]+)[:@]/)?.[1];
   return KINDS.includes(k) ? k : null;
 }
 
@@ -97,15 +116,16 @@ function newId() {
 
 // ---------------------------------------------------------------- presence
 
+// Each running MCP server says "a <kind> app is running here (in <cwd>)".
 export function heartbeat(entry) {
   const now = new Date().toISOString();
-  const file = dir("presence", `${entry.name}~${entry.pid}.json`);
+  const file = dir("presence", `${entry.kind}~${entry.pid}.json`);
   const prev = readJson(file);
   writeJsonAtomic(file, { ...entry, startedAt: prev?.startedAt || now, lastSeen: now });
 }
 
-export function clearPresence(name, pid) {
-  try { fs.unlinkSync(dir("presence", `${name}~${pid}.json`)); } catch {}
+export function clearPresence(kind, pid) {
+  try { fs.unlinkSync(dir("presence", `${kind}~${pid}.json`)); } catch {}
 }
 
 function pidAlive(pid) {
@@ -117,44 +137,46 @@ function pidAlive(pid) {
   }
 }
 
-// One row per agent name, newest heartbeat wins. Stale files are swept.
-export function listAgents({ includeOffline = true } = {}) {
-  const byName = new Map();
-  const sharedAlive = {};
+// Live MCP servers by kind (stale presence files are swept).
+function liveServers() {
+  const live = [];
   const now = Date.now();
   for (const f of listJson(dir("presence"))) {
     const p = readJson(dir("presence", f));
     if (!p) continue;
     const age = now - Date.parse(p.lastSeen);
-    const online = age < ONLINE_MS && (p.host !== os.hostname() || pidAlive(p.pid));
-    if (!online && age > RETENTION_MS) {
-      try { fs.unlinkSync(dir("presence", f)); } catch {}
-      continue;
-    }
-    // A shared server (Codex) is not an agent itself; its sessions are, below.
-    if (p.shared) {
-      sharedAlive[p.kind] ||= online;
-      continue;
-    }
-    const cur = byName.get(p.name);
-    if (!cur || (online && !cur.online) || (online === cur.online && p.lastSeen > cur.lastSeen)) {
-      byName.set(p.name, { ...p, online });
-    }
+    if (age < ONLINE_MS && (p.host !== os.hostname() || pidAlive(p.pid))) live.push(p);
+    else if (age > ONLINE_MS * 10) try { fs.unlinkSync(dir("presence", f)); } catch {}
   }
-  // Sessions seen by hooks: online when their kind's shared server is running
-  // and they were active in the last day.
-  for (const s of listSessions()) {
-    if (byName.get(s.name)?.online) continue;
-    const online = !!sharedAlive[s.kind] && now - Date.parse(s.at) < 24 * 3600_000;
-    byName.set(s.name, { name: s.name, kind: s.kind, cwd: s.cwd, online, lastSeen: s.at, sessionId: s.sessionId, idle: s.idle });
+  return live;
+}
+
+const samePath = (a, b) => !!a && !!b && path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+
+// One row per session. Online = its app is running (for Claude, a server in
+// the session's folder; Codex runs one server for all threads) and the session
+// was active in the last day. Mailboxes no session claims are listed offline.
+export function listAgents({ includeOffline = true } = {}) {
+  const live = liveServers();
+  const now = Date.now();
+  const rows = listSessions().map((s) => ({
+    name: s.name,
+    aliases: s.names.slice(1),
+    kind: s.kind,
+    title: s.title,
+    cwd: s.cwd,
+    sessionId: s.sessionId,
+    idle: s.idle,
+    lastSeen: s.at,
+    online: now - Date.parse(s.at) < 24 * 3600_000 && live.some((p) => p.kind === s.kind && (s.kind === "codex" || samePath(p.cwd, s.cwd))),
+    unread: s.names.reduce((n, name) => n + listJson(mailDir(name, "new")).length, 0),
+  }));
+  const claimed = new Set(rows.flatMap((r) => [r.name, ...r.aliases]));
+  for (const name of safeReaddir(dir("mail")).map(fromMailDir)) {
+    if (!claimed.has(name)) rows.push({ name, aliases: [], kind: kindOf(name), online: false, lastSeen: null, unread: listJson(mailDir(name, "new")).length });
   }
-  // Mailboxes that exist without a live server still count as known agents.
-  for (const name of safeReaddir(dir("mail"))) {
-    if (!byName.has(name)) byName.set(name, { name, kind: kindOf(name), online: false, lastSeen: null });
-  }
-  return [...byName.values()]
+  return rows
     .filter((a) => includeOffline || a.online)
-    .map((a) => ({ ...a, unread: listJson(dir("mail", a.name, "new")).length }))
     .sort((a, b) => Number(b.online) - Number(a.online) || String(b.lastSeen).localeCompare(String(a.lastSeen)));
 }
 
@@ -167,58 +189,114 @@ function safeReaddir(d) {
 }
 
 // ---------------------------------------------------------------- sessions
-// Hooks record which agent session last ran under each name, and whether its
-// turn is still running. Codex shares one MCP server across all its threads,
-// so this is how that server learns who is calling (see mcp.js), and how
+// One record per agent session (Claude session id / Codex thread id), in
+// sessions/<sessionId>.json:
+//   { sessionId, kind, name, names, title, cwd, transcript, host, idle, at, ... }
+// `name` is the canonical "kind:title@machine". `names` starts with it and also
+// holds aliases: earlier canonical names (a renamed session keeps receiving
+// mail sent to its old name), the folder-based "kind@folder" name, and names
+// given with `link --name` or set_name. A session reads mail sent to any of them.
+// Hooks keep records current; Codex shares one MCP server across all its
+// threads, so records are also how that server learns who is calling, and how
 // wake.js finds the session to nudge.
 
-export function recordSession(name, { kind, sessionId, cwd, idle }) {
-  if (!sessionId) return;
-  const file = dir("sessions", `${name}.json`);
-  const prev = readJson(file);
-  writeJsonAtomic(file, {
-    ...(prev?.sessionId === sessionId ? prev : {}),
-    name, kind, sessionId, cwd, idle, at: new Date().toISOString(),
-  });
-}
+const idFile = (sessionId) => dir("sessions", `${String(sessionId).replace(/[^A-Za-z0-9-]/g, "")}.json`);
 
-export function getSession(name) {
-  return readJson(dir("sessions", `${name}.json`));
-}
-
-export function updateSession(name, patch) {
-  const s = getSession(name);
-  if (s) writeJsonAtomic(dir("sessions", `${name}.json`), { ...s, ...patch });
-}
-
-export function removeSession(name) {
-  try { fs.unlinkSync(dir("sessions", `${name}.json`)); } catch {}
+// Records written by v0.2.x were keyed by name ("codex@h90.json", no `names`).
+function normalize(rec, file) {
+  if (!rec?.sessionId || !rec.kind) return null;
+  // A session only answers to names of its own app (or app-less aliases).
+  const ownApp = (n) => !kindOf(n) || kindOf(n) === rec.kind;
+  const names = [...new Set([rec.name, ...(rec.names || [])].filter((n) => n && !n.endsWith("@") && !n.endsWith(":") && ownApp(n)))];
+  return { ...rec, names, name: names[0], legacyFiles: rec.names ? [] : [file] };
 }
 
 export function listSessions(kind) {
-  return listJson(dir("sessions"))
-    .map((f) => readJson(dir("sessions", f)))
-    .filter((s) => s && (!kind || s.kind === kind))
-    .sort((a, b) => b.at.localeCompare(a.at));
+  const byId = new Map();
+  for (const f of listJson(dir("sessions"))) {
+    const rec = normalize(readJson(dir("sessions", f)), f);
+    if (!rec || (kind && rec.kind !== kind) || !rec.names.length) continue;
+    const prev = byId.get(rec.sessionId);
+    if (prev && prev.kind !== rec.kind) continue; // ids never span apps; ignore a stray
+    // A legacy record and a current one for the same session: merge their names.
+    if (prev) {
+      const [newer, older] = prev.at >= rec.at ? [prev, rec] : [rec, prev];
+      byId.set(rec.sessionId, { ...older, ...newer, names: [...new Set([...newer.names, ...older.names])], legacyFiles: [...older.legacyFiles, ...newer.legacyFiles] });
+    } else byId.set(rec.sessionId, rec);
+  }
+  return [...byId.values()].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+}
+
+export const getSessionById = (sessionId) => (sessionId ? listSessions().find((s) => s.sessionId === sessionId) : null);
+export const findSession = (name) => listSessions().find((s) => s.names.includes(name)) || null;
+
+// Creates or refreshes a session's record. Pass `title` when known; it decides
+// the canonical name. `idle` is left as it was when undefined.
+export function recordSession({ kind, sessionId, cwd, title, transcript, idle, aliases = [] }) {
+  if (!sessionId || !kind) return null;
+  const prev = getSessionById(sessionId);
+  const t = title || prev?.title || null;
+  const where = cwd || prev?.cwd || process.cwd();
+  const name = canonicalName(kind, t, where);
+  const names = [...new Set([name, ...(prev?.names || []), defaultName(kind, where), ...aliases.map(sanitizeName)])];
+  const { legacyFiles = [], ...keep } = prev || {};
+  const rec = {
+    ...keep,
+    sessionId, kind, name, names, title: t, cwd: where,
+    transcript: transcript || prev?.transcript || null,
+    host: os.hostname(),
+    idle: idle === undefined ? (prev?.idle ?? false) : idle,
+    at: new Date().toISOString(),
+  };
+  writeJsonAtomic(idFile(sessionId), rec);
+  removeLegacy(legacyFiles);
+  return rec;
+}
+
+export function updateSession(sessionId, patch) {
+  const s = getSessionById(sessionId);
+  if (!s) return;
+  const { legacyFiles = [], ...keep } = s;
+  writeJsonAtomic(idFile(sessionId), { ...keep, ...patch });
+  removeLegacy(legacyFiles);
+}
+
+// Old name-keyed files are replaced by the id-keyed record just written.
+function removeLegacy(files) {
+  for (const f of files) if (f.includes("@")) try { fs.unlinkSync(dir("sessions", f)); } catch {}
+}
+
+export function addAlias(sessionId, alias) {
+  const s = getSessionById(sessionId);
+  if (!s) throw new Error("this session is not known to the bridge yet; send any prompt first");
+  updateSession(sessionId, { names: [...new Set([...s.names, sanitizeName(alias)])] });
 }
 
 // ---------------------------------------------------------------- messages
 
-// `to` may be an exact agent name ("codex@h90") or just a kind ("codex"),
-// which picks the best live agent of that kind (same project folder first).
+// `to` may be any name or alias of a session ("codex:x32-research@alitop",
+// "codex@h90") or just a kind ("codex"), which picks the best live session of
+// that kind (same project folder as the sender first).
 export function resolveRecipient(to, from) {
   const want = sanitizeName(to);
-  if (want.includes("@") || !KINDS.includes(want)) return want;
-  const folder = from.split("@")[1];
-  const agents = listAgents().filter((a) => a.kind === want && a.name !== from);
+  if (!KINDS.includes(want)) return findSession(want)?.name || want;
+  const senderCwd = findSession(from)?.cwd;
+  const agents = listAgents().filter((a) => a.kind === want && a.name !== from && a.sessionId);
   const pick =
-    agents.find((a) => a.online && a.name.split("@")[1] === folder) ||
+    agents.find((a) => a.online && samePath(a.cwd, senderCwd)) ||
     agents.find((a) => a.online) ||
-    agents.find((a) => a.name.split("@")[1] === folder);
-  // Nobody of that kind yet: address the same-project mailbox so the next
-  // session of that kind opened in this folder picks it up.
-  return pick ? pick.name : `${want}@${folder || "default"}`;
+    agents.find((a) => samePath(a.cwd, senderCwd));
+  // Nobody of that kind yet: address the folder mailbox so the next session of
+  // that kind opened in the sender's folder picks it up.
+  return pick ? pick.name : senderCwd ? defaultName(want, senderCwd) : `${want}@default`;
 }
+
+// The bridge only carries messages between different apps. Each app already
+// has its own way to reach its other sessions.
+export const NATIVE_MESSAGING = {
+  claude: "To message another Claude session, use the SendMessage tool (ListAgents lists the sessions).",
+  codex: "To message another Codex thread, use Codex's own thread messaging (the codex_app send_message_to_thread tool).",
+};
 
 export function send({ from, to, body, thread, replyTo }) {
   from = sanitizeName(from);
@@ -230,6 +308,11 @@ export function send({ from, to, body, thread, replyTo }) {
   }
   const recipient = to ? resolveRecipient(to, from) : original?.from;
   if (!recipient) throw new Error("`to` is required unless replying to a message");
+  const fromKind = kindOf(from);
+  const toKind = findSession(recipient)?.kind || kindOf(recipient);
+  if (fromKind && fromKind === toKind) {
+    throw new Error(`agent-bridge only carries messages between Claude and Codex. ${NATIVE_MESSAGING[fromKind]}`);
+  }
   const id = newId();
   const msg = {
     id,
@@ -241,8 +324,8 @@ export function send({ from, to, body, thread, replyTo }) {
     createdAt: new Date().toISOString(),
   };
   writeJsonAtomic(dir("messages", `${id}.json`), msg);
-  ensureDir(dir("mail", recipient, "cur"));
-  writeJsonAtomic(dir("mail", recipient, "new", `${id}.json`), msg);
+  ensureDir(mailDir(recipient, "cur"));
+  writeJsonAtomic(mailDir(recipient, "new", `${id}.json`), msg);
   maybePrune();
   return msg;
 }
@@ -254,8 +337,8 @@ export function getMessage(id) {
 export function peekUnread(names, { thread } = {}) {
   const out = [];
   for (const n of new Set(names)) {
-    for (const f of listJson(dir("mail", n, "new"))) {
-      const m = readJson(dir("mail", n, "new", f));
+    for (const f of listJson(mailDir(n, "new"))) {
+      const m = readJson(mailDir(n, "new", f));
       if (m && (!thread || m.thread === thread)) out.push(m);
     }
   }
@@ -267,10 +350,10 @@ export function peekUnread(names, { thread } = {}) {
 export function takeUnread(names, opts = {}) {
   const taken = [];
   for (const m of peekUnread(names, opts)) {
-    const src = dir("mail", m.to, "new", `${m.id}.json`);
+    const src = mailDir(m.to, "new", `${m.id}.json`);
     try {
-      ensureDir(dir("mail", m.to, "cur"));
-      fs.renameSync(src, dir("mail", m.to, "cur", `${m.id}.json`));
+      ensureDir(mailDir(m.to, "cur"));
+      fs.renameSync(src, mailDir(m.to, "cur", `${m.id}.json`));
       taken.push(m);
     } catch (e) {
       if (e.code !== "ENOENT") throw e;

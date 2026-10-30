@@ -37,12 +37,21 @@ fs.writeFileSync(
   JSON.stringify({ type: "session_meta", payload: { id: "00000000-0000-0000-0000-00000000demo", cwd: project, originator: "Codex Desktop", thread_source: "user" } }) + "\n"
 );
 fs.writeFileSync(path.join(HOME, ".codex", "config.toml"), 'model = "x"\n\n\n[projects.demo]\ntrust_level = "trusted"\n');
+// A session record in the v0.2.x format (keyed by app@folder, no title) that setup must migrate.
+fs.mkdirSync(path.join(HOME, ".agent-bridge", "sessions"), { recursive: true });
+fs.writeFileSync(path.join(HOME, ".agent-bridge", "sessions", "codex@legacy.json"), JSON.stringify({ name: "codex@legacy", kind: "codex", sessionId: "legacy-thread", cwd: project, idle: true, at: "2026-10-01T00:00:00.000Z" }));
+fs.writeFileSync(path.join(HOME, ".codex", "session_index.jsonl"), JSON.stringify({ id: "legacy-thread", thread_name: "Old Thread" }) + "\n");
 
 try {
   const first = run(["setup", "--no-wait", "--no-update"]);
   assert.equal(first.status, 0, first.stderr + first.stdout);
   assert.doesNotMatch(first.stdout, /FAILED/, first.stdout);
-  assert.match(first.stdout, /codex@demo/, "recent Codex thread registered");
+  assert.match(first.stdout, /codex:demo@/, "recent Codex thread registered under app:session@machine");
+  assert.match(first.stdout, /renamed 1 session/, "v0.2.x record migrated");
+  const agentsOut = run(["agents"]).stdout;
+  assert.match(agentsOut, /codex:old-thread@\S+\s+unread 0\s+aliases: codex@legacy/, agentsOut);
+  assert.ok(!fs.existsSync(path.join(HOME, ".agent-bridge", "sessions", "codex@legacy.json")), "old record file removed");
+  assert.ok(!fs.existsSync(path.join(HOME, ".agent-bridge", "sessions", "setup-check.json")), "setup's hook check records no session");
   assert.match(first.stdout, /needs you to approve 3 hook/);
   if (EXE) {
     const installed = path.join(HOME, ".agent-bridge", "bin", process.platform === "win32" ? "agent-bridge.exe" : "agent-bridge");
@@ -80,7 +89,8 @@ try {
   );
   const linked = run(["link", "--codex-thread", "00000000-0000-0000-0000-0000000archd"]);
   assert.equal(linked.status, 0, linked.stderr + linked.stdout);
-  assert.ok(fs.existsSync(path.join(HOME, ".agent-bridge", "sessions", "codex@термопомпа-оферти.json")), linked.stdout);
+  // No title in the thread index, so the session part falls back to the folder name.
+  assert.match(linked.stdout, /linked codex:термопомпа-оферти@/, linked.stdout);
   assert.equal(run(["send", "--from", "claude@test", "--to", "codex@термопомпа-оферти", "здравей"]).status, 0);
   const hook = run(["hook", "--kind", "codex"], {
     input: JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "00000000-0000-0000-0000-0000000archd", cwd: cyr, transcript_path: "x" }),

@@ -7,11 +7,11 @@
 //                        so it can handle it (like a message from a sibling session)
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { SELF } from "./self.js";
 import * as store from "./store.js";
 import { NUDGE_PREFIX } from "./wake.js";
+import { sessionTitle } from "./titles.js";
 
 // Two agents replying to each other forever would burn tokens unattended, so
 // Stop only re-opens a turn this many times before the user speaks again.
@@ -59,36 +59,45 @@ function log(kind, input, out, err) {
 // over the thread's name.
 export const isEphemeral = (kind, input) => kind === "codex" && input.transcript_path === null;
 
+const EVENTS = ["SessionStart", "UserPromptSubmit", "Stop"];
+
 function handle(kind, input) {
   if (isEphemeral(kind, input)) return null;
   const event = input.hook_event_name || input.hookEventName;
+  // Only real session events are recorded (setup's hook check sends a dummy one).
+  if (!EVENTS.includes(event)) return null;
   const cwd = input.cwd || process.cwd();
-  const names = myNames(kind, cwd, input.session_id);
-  const remember = (idle) => {
-    for (const n of names) store.recordSession(n, { kind, sessionId: input.session_id, cwd, idle });
-  };
+  const sessionId = input.session_id;
+  const transcript = input.transcript_path || null;
+  // Refresh the record first so the name below reflects the current title.
+  const rec = store.recordSession({ kind, sessionId, cwd, transcript, title: sessionTitle(kind, { sessionId, transcript }) });
+  const names = rec ? rec.names : [store.defaultName(kind, cwd)];
   const out = respond(event, kind, input, names);
   // Busy while a turn runs; idle once Stop lets it end (wake.js nudges idle Codex sessions).
-  remember(event === "Stop" && !out?.decision);
+  if (rec) store.updateSession(sessionId, { idle: event === "Stop" && !out?.decision });
   return out;
 }
 
+const OTHER = { claude: "codex", codex: "claude" };
+const APP = { claude: "Claude", codex: "Codex" };
+
 function respond(event, kind, input, names) {
   if (event === "SessionStart") {
-    const peers = store.listAgents({ includeOffline: false }).filter((a) => !names.includes(a.name));
+    const other = OTHER[kind];
+    const peers = store.listAgents({ includeOffline: false }).filter((a) => a.kind === other);
     // Only announce waiting mail here; UserPromptSubmit (which always follows)
     // delivers it, so a nudge prompt can tell a stale nudge from a live one.
     const waiting = store.peekUnread(names).length;
     const lines = [
-      `[agent-bridge] You are "${names[0]}". Use the agent-bridge MCP tools (send, reply, wait, inbox, agents) to talk to other agent sessions on this machine.`,
-      peers.length ? `Online now: ${peers.map((p) => p.name).join(", ")}.` : "No other agents are online right now.",
+      `[agent-bridge] Your bridge name is "${names[0]}" (app:session@machine). agent-bridge is only for messaging ${APP[other]} sessions on this machine: use its MCP tools (send, reply, wait, inbox, agents). ${store.NATIVE_MESSAGING[kind]}`,
+      peers.length ? `${APP[other]} sessions online now: ${peers.map((p) => p.name).join(", ")}.` : `No ${APP[other]} sessions are online right now.`,
     ];
     if (kind === "claude") {
       // Claude Code can't be poked from outside, but its Monitor tool wakes the
       // session on each line a background command prints.
       const self = SELF.map((p) => `"${p.replace(/\\/g, "/")}"`).join(" ");
       lines.push(
-        `When you expect replies, or the user asks you to stay reachable, run \`${self} watch --as ${names[0]}\` with the Monitor tool (persistent) so messages wake you while idle.`
+        `When you expect replies from Codex, or the user asks you to stay reachable, run \`${self} watch --as ${names[0]}\` with the Monitor tool (persistent) so messages wake you while idle.`
       );
     }
     if (waiting) lines.push(`${waiting} message(s) from other agents are waiting; they are attached to the prompt below.`);
@@ -105,7 +114,7 @@ function respond(event, kind, input, names) {
     }
     const mail = store.takeUnread(names);
     if (mail.length) {
-      store.updateSession(names[0], { deliveredAt: new Date().toISOString() });
+      store.updateSession(input.session_id, { deliveredAt: new Date().toISOString() });
       return context(event, `[agent-bridge] Messages from other agents arrived:\n\n${store.formatMessages(mail)}`);
     }
     if (!nudged) return null;
@@ -113,8 +122,8 @@ function respond(event, kind, input, names) {
     // app's queued copy into the same turn, or the app runs it long after the
     // mail went out another way. Right after a delivery, say nothing (the
     // agent is handling it); otherwise let the agent know there's nothing new.
-    const s = store.getSession(names[0]);
-    if (s?.sessionId === input.session_id && s.deliveredAt && Date.now() - Date.parse(s.deliveredAt) < 10 * 60_000) return null;
+    const s = store.getSessionById(input.session_id);
+    if (s?.deliveredAt && Date.now() - Date.parse(s.deliveredAt) < 10 * 60_000) return null;
     return context(event, `[agent-bridge] No new messages came with this nudge; they were already delivered earlier. If nothing else is pending, just stop.`);
   }
 
@@ -138,20 +147,6 @@ function respond(event, kind, input, names) {
 
 function context(event, text) {
   return { hookSpecificOutput: { hookEventName: event, additionalContext: text } };
-}
-
-// The session's mailboxes: names registered to this exact session (e.g. by
-// `agent-bridge link`) first, then the folder default, plus any names a live
-// MCP server of the same kind in the same folder has taken with set_name.
-function myNames(kind, cwd, sessionId) {
-  const linked = sessionId ? store.listSessions(kind).filter((s) => s.sessionId === sessionId).map((s) => s.name) : [];
-  const base = store.defaultName(kind, cwd);
-  const resolved = path.resolve(cwd).toLowerCase();
-  const extra = store
-    .listAgents({ includeOffline: false })
-    .filter((a) => a.kind === kind && a.host === os.hostname() && a.cwd && path.resolve(a.cwd).toLowerCase() === resolved)
-    .map((a) => a.name);
-  return [...new Set([...linked, base, ...extra])];
 }
 
 function stateFile(sessionId) {

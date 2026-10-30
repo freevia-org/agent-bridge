@@ -15,6 +15,7 @@ import { IS_EXE, ROOT, SELF, EXE_HOME } from "./self.js";
 import * as store from "./store.js";
 import { install, doctor, formatDoctor, codexApproval, hookCommand } from "./install.js";
 import { linkCodexThread } from "./wake.js";
+import { codexTitle, claudeTitle } from "./titles.js";
 
 const CODEX_HOME = () => process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 const say = (s = "") => console.log(s);
@@ -42,9 +43,11 @@ export async function setup({ wait = process.stdin.isTTY, update = true, waitMin
   say("1/4 Installing for Claude Code and Codex");
   for (const line of install()) say(`    ${line}`);
 
-  say("2/4 Registering recent Codex threads");
+  say("2/4 Registering sessions (names: app:session@machine)");
+  const migrated = migrateLegacySessions();
+  if (migrated) say(`    renamed ${migrated} session(s) from the old app@folder names (old names still work)`);
   const linked = linkRecentCodexThreads();
-  say(linked.length ? linked.map((l) => `    ${l.name}  ->  ${l.title || l.sessionId}`).join("\n") : "    (none new)");
+  say(linked.length ? linked.map((l) => `    ${l.name}`).join("\n") : "    (none new)");
 
   say("3/4 Checking the hook commands run");
   const broken = checkHookCommands();
@@ -107,8 +110,37 @@ function git(...args) {
   try { return execFileSync("git", ["-C", ROOT, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch { return null; }
 }
 
-// Most recent Codex app thread per project folder (last 30 days), skipping
-// names the bridge already knows and threads from `codex exec` or subagents.
+// Records from v0.2.x are keyed by "app@folder" and have no title. Convert
+// each to the current form (named app:title@machine, old name kept as an
+// alias), whether or not its session is still active. Titles come from
+// Codex's thread index (it keeps archived threads) or the Claude transcript.
+export function migrateLegacySessions() {
+  const claudeProjects = path.join(os.homedir(), ".claude", "projects");
+  let n = 0;
+  for (const s of store.listSessions()) {
+    if (!s.legacyFiles.length) continue;
+    let transcript = s.transcript || null;
+    let title = null;
+    if (s.kind === "codex") title = codexTitle(s.sessionId);
+    else {
+      try {
+        for (const p of fs.readdirSync(claudeProjects)) {
+          const f = path.join(claudeProjects, p, `${s.sessionId}.jsonl`);
+          if (fs.existsSync(f)) { transcript = f; break; }
+        }
+      } catch {}
+      title = claudeTitle(transcript);
+    }
+    store.recordSession({ kind: s.kind, sessionId: s.sessionId, cwd: s.cwd, title, transcript, idle: s.idle });
+    n++;
+  }
+  return n;
+}
+
+// Codex app threads used in the last 30 days (not `codex exec` or subagent
+// threads), each under its own name "codex:<thread title>@<machine>". Threads
+// already known get their title refreshed, which also migrates records from
+// older versions to the current naming.
 export function linkRecentCodexThreads({ days = 30 } = {}) {
   const root = path.join(CODEX_HOME(), "sessions");
   const cutoff = Date.now() - days * 24 * 3600_000;
@@ -117,33 +149,21 @@ export function linkRecentCodexThreads({ days = 30 } = {}) {
     if (/rollout-.*\.jsonl$/.test(p) && st.mtimeMs >= cutoff) files.push({ p, mtime: st.mtimeMs });
   });
   files.sort((a, b) => b.mtime - a.mtime);
-  // Records named "kind@" came from a version that dropped non-Latin folder
-  // names; remove them so the thread is registered under its proper name.
-  for (const s of store.listSessions()) if (s.name.endsWith("@")) store.removeSession(s.name);
-  const known = new Set(store.listSessions().map((s) => s.name));
   const linked = [];
   for (const { p } of files) {
     const meta = firstLine(p)?.payload;
     if (!meta?.id || !meta.cwd || meta.originator !== "Codex Desktop" || meta.thread_source !== "user") continue;
-    const name = store.defaultName("codex", meta.cwd.replace(/^\\\\\?\\/, ""));
-    if (known.has(name)) continue;
-    known.add(name);
+    const known = store.getSessionById(meta.id);
+    if (known) {
+      store.recordSession({ kind: "codex", sessionId: meta.id, cwd: known.cwd, title: codexTitle(meta.id) });
+      continue;
+    }
     try {
-      linked.push({ ...linkCodexThread(meta.id, { cwd: meta.cwd }), title: threadTitle(meta.id) });
+      const rec = linkCodexThread(meta.id, { cwd: meta.cwd });
+      linked.push({ ...rec, title: codexTitle(meta.id) });
     } catch {}
   }
   return linked;
-}
-
-function threadTitle(id) {
-  try {
-    const idx = fs.readFileSync(path.join(CODEX_HOME(), "session_index.jsonl"), "utf8").trim().split("\n");
-    for (let i = idx.length - 1; i >= 0; i--) {
-      const e = JSON.parse(idx[i]);
-      if (e.id === id) return e.thread_name;
-    }
-  } catch {}
-  return null;
 }
 
 // The first line of a rollout is its session_meta; it can be large, so read

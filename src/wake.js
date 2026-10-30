@@ -24,6 +24,7 @@ import path from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import * as store from "./store.js";
 import { SELF } from "./self.js";
+import { codexTitle } from "./titles.js";
 
 export const NUDGE_PREFIX = "[agent-bridge nudge]";
 const NUDGE_EVERY_MS = 60_000;
@@ -37,7 +38,7 @@ const nudgeText = (from) =>
 
 export function wakeIfIdle(recipient, from) {
   try {
-    const s = store.getSession(recipient);
+    const s = store.findSession(recipient);
     if (!s || s.kind !== "codex" || !s.idle || !s.sessionId) return false;
     if (Date.now() - Date.parse(s.at) > SESSION_MAX_AGE_MS) return false;
     // Hold off only while an earlier nudge is still pending: once the session
@@ -48,7 +49,7 @@ export function wakeIfIdle(recipient, from) {
     if (!codex) return false;
     const nudgedAt = new Date().toISOString();
     detached(codex, ["queue", "--thread", s.sessionId, "--message", nudgeText(from)]);
-    store.updateSession(recipient, { nudgedAt });
+    store.updateSession(s.sessionId, { nudgedAt });
     detached(SELF[0], [...SELF.slice(1), "wake-check", "--name", recipient, "--nudged", nudgedAt, "--from", from]);
     return true;
   } catch {
@@ -59,14 +60,14 @@ export function wakeIfIdle(recipient, from) {
 // Runs in its own detached process (see wakeIfIdle).
 export async function wakeCheck({ name, nudgedAt, from }) {
   await new Promise((r) => setTimeout(r, FALLBACK_MS));
-  const s = store.getSession(name);
+  const s = store.findSession(name);
   if (!s?.sessionId) return log(name, "no session recorded; nothing to do");
   if (!store.peekUnread([name]).length) return log(name, "mail was picked up; app woke the thread");
   if (Date.parse(s.at) > Date.parse(nudgedAt) && !s.idle) return log(name, "a turn is already running; its Stop hook will deliver");
   if (s.fallbackAt && Date.parse(s.fallbackAt) > Date.parse(nudgedAt)) return log(name, "fallback already started");
   const codex = findCodex();
   if (!codex) return log(name, "codex CLI not found; cannot fall back");
-  store.updateSession(name, { fallbackAt: new Date().toISOString() });
+  store.updateSession(s.sessionId, { fallbackAt: new Date().toISOString() });
   log(name, `thread ${s.sessionId} not loaded in the app; running codex exec resume`);
   const out = fs.openSync(path.join(store.home(), "wake-exec.log"), "a");
   const child = spawn(codex, ["exec", "--skip-git-repo-check", "resume", s.sessionId, nudgeText(from)], {
@@ -94,9 +95,9 @@ export function linkCodexThread(threadId, { cwd, name } = {}) {
     if (!cwd) throw new Error(`thread ${threadId} has no cwd in its session_meta; pass --cwd`);
   }
   cwd = cwd.replace(/^\\\\\?\\/, "");
-  const n = store.sanitizeName(name || store.defaultName("codex", cwd));
-  store.recordSession(n, { kind: "codex", sessionId: threadId, cwd, idle: true });
-  return { name: n, sessionId: threadId, cwd };
+  // The thread's own title names it; --name adds an alias.
+  const rec = store.recordSession({ kind: "codex", sessionId: threadId, cwd, title: codexTitle(threadId), idle: true, aliases: name ? [name] : [] });
+  return { name: rec.name, aliases: rec.names.slice(1), sessionId: threadId, cwd };
 }
 
 function findFile(dir, match) {

@@ -4,6 +4,11 @@ Lets Claude Code and Codex sessions on the same machine message each other
 the way sessions of one tool message their siblings: send, reply, wait for an
 answer, and receive mail without polling.
 
+It is only for **Claude ↔ Codex**. Each app already has its own messaging for
+its other sessions, and the bridge refuses same-app messages with a pointer to it:
+Claude sessions use **SendMessage**, and Codex threads use Codex's own thread
+messaging (`send_message_to_thread`).
+
 Zero dependencies. Needs Node 18+. Works on Windows, macOS and Linux.
 
 ## Setup
@@ -92,7 +97,7 @@ Setup is idempotent and backs up every file before editing it
 | `~/.codex/hooks.json` | the same three hooks |
 
 The installer writes absolute paths. If you move the folder, run setup again.
-`agent-bridge link --codex-thread <id> [--name codex@x]` registers any other
+`agent-bridge link --codex-thread <id> [--name alias]` registers any other
 existing Codex thread.
 `agent-bridge uninstall` removes everything it added. `--claude-only` and
 `--codex-only` limit the install to one side.
@@ -105,12 +110,19 @@ existing Codex thread.
                        │   messages/ mail/ presence/ sessions/
 ```
 
-* **Identity.** Each session is `<kind>@<project-folder>`, e.g. `claude@h90` or
-  `codex@h90`. To reach the best live session of a kind, address it by kind
-  alone (`codex`). `set_name` renames a session when several share a folder.
+* **Names.** Each session is `<app>:<session title>@<machine>`, e.g.
+  `claude:agent-bridge@alitop` or `codex:x32-research@alitop`.
+  * The title is the one each app shows: Claude's session title, or the Codex
+    thread name.
+  * Renaming a session gives it a new name, and the old one keeps working.
+  * The older folder-based names (`codex@h90`) also still work as aliases.
+  * To reach the best live session of the other app, use just `codex` or `claude`.
+  * `set_name` adds an extra alias.
+* **Who is calling.** Codex sends its thread id with every tool call. Claude
+  sends a tool-call id, which the server finds in the session's transcript.
 * **Tools** (both sides): `send`, `reply`, `wait`, `inbox`, `thread`, `agents`,
   `whoami`, `set_name`. `send`/`reply` take `wait_for_reply_seconds` for
-  request/response exchanges.
+  request/response exchanges. `agents` lists only the other app's sessions.
 * **Push delivery.** Hooks hand unread mail to the agent:
   * **SessionStart:** tells the agent its name, who is online, and any waiting mail.
   * **UserPromptSubmit:** attaches mail to your next prompt.

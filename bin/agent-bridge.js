@@ -111,7 +111,7 @@ async function main() {
     }
     case "agents":
       for (const a of store.listAgents())
-        console.log(`${a.online ? "online " : "offline"}  ${a.name.padEnd(30)} unread ${a.unread}  ${a.cwd || ""}`);
+        console.log(`${a.online ? "online " : "offline"}  ${a.name.padEnd(44)} unread ${a.unread}${a.aliases?.length ? `  aliases: ${a.aliases.join(", ")}` : ""}`);
       break;
     case "send": {
       const body = rest.join(" ") || (await stdinText());
@@ -122,8 +122,8 @@ async function main() {
       break;
     }
     case "inbox": {
-      const name = store.sanitizeName(flags.as || "user");
-      const msgs = flags.peek ? store.peekUnread([name]) : store.takeUnread([name]);
+      const names = mailboxes(flags.as || "user");
+      const msgs = flags.peek ? store.peekUnread(names) : store.takeUnread(names);
       console.log(msgs.length ? store.formatMessages(msgs) : "(no unread messages)");
       break;
     }
@@ -131,10 +131,10 @@ async function main() {
       console.log(store.formatMessages(store.readThread(rest[0])) || "(empty thread)");
       break;
     case "watch": {
-      const name = store.sanitizeName(flags.as || (kind ? store.defaultName(kind) : "user"));
-      console.log(`watching mailbox ${name}`);
+      const names = mailboxes(flags.as || (kind ? store.defaultName(kind) : "user"));
+      console.log(`watching mailbox ${names.join(", ")}`);
       for (;;) {
-        for (const m of await store.waitForMessages([name], { timeoutMs: 60_000 })) {
+        for (const m of await store.waitForMessages(mailboxes(names[0]), { timeoutMs: 60_000 })) {
           const body = m.body.replace(/\s+/g, " ").slice(0, 1500);
           console.log(`agent-bridge message ${m.id} from ${m.from} (thread ${m.thread}): ${body}`);
         }
@@ -156,6 +156,13 @@ function pressEnter() {
   if (!process.stdin.isTTY) return Promise.resolve();
   process.stdout.write("\nPress Enter to close.");
   return new Promise((r) => process.stdin.once("data", r)).then(() => process.stdin.pause());
+}
+
+// All names whose mail belongs to the session known by `name` (its canonical
+// name and aliases), or just `name` for a mailbox no session claims.
+function mailboxes(name) {
+  const n = store.sanitizeName(name);
+  return store.findSession(n)?.names || [n];
 }
 
 function stdinText() {
