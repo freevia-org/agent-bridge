@@ -17,8 +17,10 @@ const PROJECT = path.join(HOME, "proj");
 const CODEX_HOME = path.join(HOME, "codex");
 fs.mkdirSync(PROJECT);
 fs.mkdirSync(CODEX_HOME);
-const env = { ...process.env, AGENT_BRIDGE_HOME: path.join(HOME, "store"), CODEX_HOME };
-const M = os.hostname().toLowerCase().replace(/[^\p{L}\p{N}._-]+/gu, "-");
+// The machine part of names is pinned: macOS hosts can report an IP address as
+// their hostname, and the bridge deliberately avoids that (see machineName).
+const M = "testbox";
+const env = { ...process.env, AGENT_BRIDGE_HOME: path.join(HOME, "store"), CODEX_HOME, AGENT_BRIDGE_MACHINE: M };
 
 // Session titles: a Claude transcript and a Codex thread index.
 const transcript = path.join(HOME, "claude-sess.jsonl");
