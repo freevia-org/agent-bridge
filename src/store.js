@@ -13,6 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 
 export const KINDS = ["claude", "codex"];
 const ONLINE_MS = 90_000;
@@ -89,7 +90,27 @@ export function sanitizeName(name) {
 // One component of a name: no "@" or ":" (those separate the parts).
 const part = (s) => sanitizeName(String(s || "").replace(/[@:]/g, " ") || "x").replace(/[@:]/g, "-");
 
-export const machineName = () => part(os.hostname() || "machine");
+// The machine part of a name must be stable. macOS reports its network
+// address as the hostname when reverse DNS has no entry, and that changes with
+// DHCP, so macOS asks for the name from System Settings instead.
+// AGENT_BRIDGE_MACHINE overrides everything.
+const isIp = (s) => /^\d{1,3}(\.\d{1,3}){3}$/.test(s);
+let cachedMachine;
+export function machineName() {
+  if (cachedMachine) return cachedMachine;
+  if (process.env.AGENT_BRIDGE_MACHINE) return (cachedMachine = part(process.env.AGENT_BRIDGE_MACHINE));
+  const candidates = [];
+  if (process.platform === "darwin") {
+    for (const key of ["LocalHostName", "ComputerName"]) {
+      try {
+        candidates.push(execFileSync("scutil", ["--get", key], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 3000 }).trim());
+      } catch {}
+    }
+  }
+  candidates.push(os.hostname());
+  const name = candidates.find((c) => c && !isIp(c)) || `${process.platform}-${os.userInfo().username}`;
+  return (cachedMachine = part(name));
+}
 
 export function canonicalName(kind, title, cwd = process.cwd()) {
   const label = String(title || "").trim() || path.basename(path.resolve(cwd)) || "session";
