@@ -279,7 +279,17 @@ export function addAlias(sessionId, alias) {
 // that kind (same project folder as the sender first).
 export function resolveRecipient(to, from) {
   const want = sanitizeName(to);
-  if (!KINDS.includes(want)) return findSession(want)?.name || want;
+  if (!KINDS.includes(want)) {
+    const matches = listSessions().filter((s) => s.names.includes(want));
+    const exact = matches.find((s) => s.name === want);
+    if (exact) return exact.name;
+    // An old folder name ("codex@h90") is shared by every session in that
+    // folder; picking one silently could reach the wrong session.
+    if (matches.length > 1) {
+      throw new Error(`"${want}" is an old name shared by ${matches.length} sessions: ${matches.map((s) => s.name).join(", ")}. Send to one of those names instead.`);
+    }
+    return matches[0]?.name || want;
+  }
   const senderCwd = findSession(from)?.cwd;
   const agents = listAgents().filter((a) => a.kind === want && a.name !== from && a.sessionId);
   const pick =

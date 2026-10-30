@@ -169,6 +169,13 @@ try {
   await claude.call("send", { to: "codex@nickname", body: "via link" });
   assert.match(hook("codex", { hook_event_name: "UserPromptSubmit", session_id: "linked-sess", cwd: PROJECT, transcript_path: "x" }).hookSpecificOutput.additionalContext, /via link/);
 
+  // Two Codex threads in one folder share its old name; sending to it is
+  // refused with the exact names instead of guessing.
+  setCodexTitle("second-sess", "Second Thread");
+  hook("codex", { hook_event_name: "UserPromptSubmit", session_id: "second-sess", cwd: PROJECT, transcript_path: "x" });
+  const ambiguous = await claude.call("send", { to: "codex@proj", body: "which one?" });
+  assert.match(ambiguous, /old name shared by \d+ sessions: .*codex:second-thread@/s);
+
   // Threads keep both directions.
   const thread = (await claude.call("send", { to: "codex", body: "t1" })).sent.thread;
   assert.match(await claude.call("thread", { thread }), /t1/);
