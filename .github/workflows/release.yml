@@ -1,3 +1,7 @@
+#I5 admission may wait up to 60 minutes. The original whole-work budget
+#starts after the hook; each existing step receives only its remaining share.
+#Step ids, commands, conditions and secret scopes stay in place.
+
 # Push a tag like v0.2.0 to build the standalone executables for every
 # platform, test each one, and attach them to the GitHub release for that tag.
 # Running it by hand (workflow_dispatch) on a branch builds and tests
@@ -27,15 +31,68 @@ jobs:
     # if another platform failed (the run itself still reports the failure).
     if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') }}
     runs-on: agent-bridge-i5-linux
-    timeout-minutes: 10
+    timeout-minutes: 70
     permissions:
       contents: write
     steps:
+      - name: Start original execution budget after admission
+        id: runner_work_budget
+        if: ${{ contains(runner.name, '-i5-') }}
+        timeout-minutes: 1
+        shell: bash
+        env:
+          CI_EXECUTION_MINUTES: 10
+        run: |+
+          set -euo pipefail
+          if [[ ! "$CI_EXECUTION_MINUTES" =~ ^[0-9]+$ ]] ||
+             (( CI_EXECUTION_MINUTES < 1 || CI_EXECUTION_MINUTES > 360 )); then
+            echo "::error::Invalid execution budget"
+            exit 1
+          fi
+          printf 'deadline=%s\n' "$(( $(/usr/bin/date +%s) + CI_EXECUTION_MINUTES * 60 ))" >> "$GITHUB_OUTPUT"
+
+      - name: Check remaining execution budget (1)
+        id: runner_budget_001
+        if: ${{ contains(runner.name, '-i5-') && (success()) }}
+        timeout-minutes: 1
+        shell: bash
+        env:
+          CI_EXECUTION_DEADLINE: ${{ steps.runner_work_budget.outputs.deadline }}
+          CI_STEP_LIMIT: 360
+        run: &runner_budget_guard_publish |+
+          set -euo pipefail
+          if [[ ! "$CI_EXECUTION_DEADLINE" =~ ^[0-9]+$ ]] ||
+             [[ ! "$CI_STEP_LIMIT" =~ ^[0-9]+$ ]] ||
+             (( CI_STEP_LIMIT < 1 || CI_STEP_LIMIT > 360 )); then
+            echo "::error::Execution budget metadata is unavailable"
+            exit 1
+          fi
+          remaining=$(( CI_EXECUTION_DEADLINE - $(/usr/bin/date +%s) ))
+          if (( remaining <= 0 )); then
+            printf 'ready=false\nminutes=1\n' >> "$GITHUB_OUTPUT"
+            echo "::error::Original execution budget exhausted after capacity admission"
+            exit 1
+          fi
+          minutes=$(( (remaining + 59) / 60 ))
+          if (( minutes > CI_STEP_LIMIT )); then minutes=$CI_STEP_LIMIT; fi
+          printf 'ready=true\nminutes=%s\n' "$minutes" >> "$GITHUB_OUTPUT"
+
       - uses: actions/download-artifact@v8
         with:
           pattern: exe-*
           path: dist
           merge-multiple: true
+        if: ${{ (success()) && (!contains(runner.name, '-i5-') || steps.runner_budget_001.outputs.ready == 'true') }}
+        timeout-minutes: ${{ contains(runner.name, '-i5-') && fromJSON(steps.runner_budget_001.outputs.minutes || '1') || 360 }}
+      - name: Check remaining execution budget (2)
+        id: runner_budget_002
+        if: ${{ contains(runner.name, '-i5-') && (success()) }}
+        timeout-minutes: 1
+        shell: bash
+        env:
+          CI_EXECUTION_DEADLINE: ${{ steps.runner_work_budget.outputs.deadline }}
+          CI_STEP_LIMIT: 360
+        run: *runner_budget_guard_publish
       - name: Attach to release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -49,3 +106,5 @@ jobs:
           ls -l "${files[@]}"
           gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes 2>/dev/null || true
           gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+        if: ${{ (success()) && (!contains(runner.name, '-i5-') || steps.runner_budget_002.outputs.ready == 'true') }}
+        timeout-minutes: ${{ contains(runner.name, '-i5-') && fromJSON(steps.runner_budget_002.outputs.minutes || '1') || 360 }}

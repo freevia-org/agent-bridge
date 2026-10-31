@@ -1,3 +1,7 @@
+#I5 admission may wait up to 60 minutes. The original whole-work budget
+#starts after the hook; each existing step receives only its remaining share.
+#Step ids, commands, conditions and secret scopes stay in place.
+
 name: Manual CodeQL security scan
 
 on:
@@ -13,7 +17,7 @@ jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    timeout-minutes: ${{ contains(matrix.runner, '-i5-') && 180 || 120 }}
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -26,14 +30,80 @@ jobs:
             runner: agent-bridge-i5-linux
             build-mode: none
     steps:
+      - name: Start original execution budget after admission
+        id: runner_work_budget
+        if: ${{ contains(runner.name, '-i5-') }}
+        timeout-minutes: 1
+        shell: bash
+        env:
+          CI_EXECUTION_MINUTES: 120
+        run: |+
+          set -euo pipefail
+          if [[ ! "$CI_EXECUTION_MINUTES" =~ ^[0-9]+$ ]] ||
+             (( CI_EXECUTION_MINUTES < 1 || CI_EXECUTION_MINUTES > 360 )); then
+            echo "::error::Invalid execution budget"
+            exit 1
+          fi
+          printf 'deadline=%s\n' "$(( $(/usr/bin/date +%s) + CI_EXECUTION_MINUTES * 60 ))" >> "$GITHUB_OUTPUT"
+
+      - name: Check remaining execution budget (1)
+        id: runner_budget_001
+        if: ${{ contains(runner.name, '-i5-') && (success()) }}
+        timeout-minutes: 1
+        shell: bash
+        env:
+          CI_EXECUTION_DEADLINE: ${{ steps.runner_work_budget.outputs.deadline }}
+          CI_STEP_LIMIT: 360
+        run: &runner_budget_guard_analyze |+
+          set -euo pipefail
+          if [[ ! "$CI_EXECUTION_DEADLINE" =~ ^[0-9]+$ ]] ||
+             [[ ! "$CI_STEP_LIMIT" =~ ^[0-9]+$ ]] ||
+             (( CI_STEP_LIMIT < 1 || CI_STEP_LIMIT > 360 )); then
+            echo "::error::Execution budget metadata is unavailable"
+            exit 1
+          fi
+          remaining=$(( CI_EXECUTION_DEADLINE - $(/usr/bin/date +%s) ))
+          if (( remaining <= 0 )); then
+            printf 'ready=false\nminutes=1\n' >> "$GITHUB_OUTPUT"
+            echo "::error::Original execution budget exhausted after capacity admission"
+            exit 1
+          fi
+          minutes=$(( (remaining + 59) / 60 ))
+          if (( minutes > CI_STEP_LIMIT )); then minutes=$CI_STEP_LIMIT; fi
+          printf 'ready=true\nminutes=%s\n' "$minutes" >> "$GITHUB_OUTPUT"
+
       - name: Checkout repository
         uses: actions/checkout@v7
+        if: ${{ (success()) && (!contains(runner.name, '-i5-') || steps.runner_budget_001.outputs.ready == 'true') }}
+        timeout-minutes: ${{ contains(runner.name, '-i5-') && fromJSON(steps.runner_budget_001.outputs.minutes || '1') || 360 }}
+      - name: Check remaining execution budget (2)
+        id: runner_budget_002
+        if: ${{ contains(runner.name, '-i5-') && (success()) }}
+        timeout-minutes: 1
+        shell: bash
+        env:
+          CI_EXECUTION_DEADLINE: ${{ steps.runner_work_budget.outputs.deadline }}
+          CI_STEP_LIMIT: 360
+        run: *runner_budget_guard_analyze
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+        if: ${{ (success()) && (!contains(runner.name, '-i5-') || steps.runner_budget_002.outputs.ready == 'true') }}
+        timeout-minutes: ${{ contains(runner.name, '-i5-') && fromJSON(steps.runner_budget_002.outputs.minutes || '1') || 360 }}
+      - name: Check remaining execution budget (3)
+        id: runner_budget_003
+        if: ${{ contains(runner.name, '-i5-') && (success()) }}
+        timeout-minutes: 1
+        shell: bash
+        env:
+          CI_EXECUTION_DEADLINE: ${{ steps.runner_work_budget.outputs.deadline }}
+          CI_STEP_LIMIT: 360
+        run: *runner_budget_guard_analyze
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v4
         with:
           category: /language:${{ matrix.language }}
+        if: ${{ (success()) && (!contains(runner.name, '-i5-') || steps.runner_budget_003.outputs.ready == 'true') }}
+        timeout-minutes: ${{ contains(runner.name, '-i5-') && fromJSON(steps.runner_budget_003.outputs.minutes || '1') || 360 }}
