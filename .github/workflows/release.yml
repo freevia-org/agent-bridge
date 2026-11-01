@@ -1,12 +1,8 @@
-# Push a tag like v0.2.0 to build the standalone executables for every
-# platform, test each one, and attach them to the GitHub release for that tag.
-# Running it by hand (workflow_dispatch) on a branch builds and tests
-# everything but publishes nothing: a dry run.
+# Build and test the standalone executables for every platform.
+# Manual runs build and test; publishing remains a separate explicit step.
 name: release
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
