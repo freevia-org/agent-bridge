@@ -246,7 +246,7 @@ export function runMcpServer({ kind, name }) {
         return reply({
           protocolVersion: params.protocolVersion || "2025-06-18",
           capabilities: { tools: {} },
-          serverInfo: { name: "agent-bridge", version: "0.3.0" },
+          serverInfo: { name: "agent-bridge", version: "0.3.3" },
           instructions,
         });
       case "ping":
