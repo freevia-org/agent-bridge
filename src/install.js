@@ -259,8 +259,8 @@ function removeTomlTable(toml) {
   const out = [];
   let skipping = false;
   for (const line of toml.split(/\r?\n/)) {
-    const header = line.match(/^\s*\[([^\]]+)\]\s*$/);
-    if (header) skipping = header[1] === `mcp_servers.${SERVER}` || header[1].startsWith(`mcp_servers.${SERVER}.`);
+    const header = tomlTableHeader(line);
+    if (header !== null) skipping = header === `mcp_servers.${SERVER}` || header.startsWith(`mcp_servers.${SERVER}.`);
     if (!skipping) out.push(line);
   }
   return out.join("\n");
@@ -270,16 +270,26 @@ function removeTomlTable(toml) {
 function upsertTomlTable(toml, block) {
   const lines = toml.split(/\r?\n/);
   const isOurs = (h) => h === `mcp_servers.${SERVER}` || h.startsWith(`mcp_servers.${SERVER}.`);
-  const start = lines.findIndex((l) => isOurs(l.match(/^\s*\[([^\]]+)\]\s*$/)?.[1] || ""));
+  const start = lines.findIndex((l) => isOurs(tomlTableHeader(l) || ""));
   if (start < 0) return `${toml.trimEnd()}\n\n${block}`;
   let end = start + 1;
-  while (end < lines.length && !(/^\s*\[([^\]]+)\]\s*$/.test(lines[end]) && !isOurs(lines[end].match(/^\s*\[([^\]]+)\]/)[1]))) end++;
+  while (end < lines.length && (tomlTableHeader(lines[end]) === null || isOurs(tomlTableHeader(lines[end])))) end++;
   // Our old table's trailing blank lines are replaced by exactly one; nothing
   // outside our table is touched.
   while (end > start + 1 && lines[end - 1].trim() === "") end--;
   const after = lines.slice(end);
   while (after.length && after[0].trim() === "") after.shift();
   return [...lines.slice(0, start), ...block.trimEnd().split("\n"), ...(after.length ? ["", ...after] : [""])].join("\n");
+}
+
+// Returns a standard or array-of-tables header name, or null for other lines.
+// The bracket pairs must be balanced so malformed lines are never treated as
+// boundaries that could cause unrelated user configuration to be discarded.
+function tomlTableHeader(line) {
+  const s = line.trim();
+  if (s.startsWith("[[") && s.endsWith("]]")) return s.slice(2, -2).trim();
+  if (s.startsWith("[") && s.endsWith("]") && !s.startsWith("[[")) return s.slice(1, -1).trim();
+  return null;
 }
 
 // TOML literal string (no escapes), falling back to a basic string.

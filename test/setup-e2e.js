@@ -61,6 +61,9 @@ try {
   const toml = fs.readFileSync(path.join(HOME, ".codex", "config.toml"), "utf8");
   assert.ok(toml.startsWith('model = "x"\n\n\n[projects.demo]'), "user's config.toml content untouched");
   assert.match(toml, /\[mcp_servers\.agent-bridge\]/);
+  // An array-of-tables after our table must remain outside the replaced range.
+  const unrelated = '\n[[skills.config]]\nname = "preserve-me"\n[skills.config.metadata]\nsource = "user"\n';
+  fs.appendFileSync(path.join(HOME, ".codex", "config.toml"), unrelated);
   const hooks = JSON.parse(fs.readFileSync(path.join(HOME, ".codex", "hooks.json"), "utf8")).hooks;
   assert.deepEqual(Object.keys(hooks).sort(), ["SessionStart", "Stop", "UserPromptSubmit"]);
   assert.equal(run(["doctor"]).status, 1, "doctor fails until the hooks are approved");
@@ -77,6 +80,7 @@ try {
   const again = run(["setup", "--no-wait", "--no-update"]);
   assert.equal((again.stdout.match(/\bunchanged\b/g) || []).length, 4, again.stdout);
   assert.match(again.stdout, /already approved/);
+  assert.ok(fs.readFileSync(path.join(HOME, ".codex", "config.toml"), "utf8").includes(unrelated.trimStart()), "setup preserves array-of-tables and its child table");
 
   // An archived thread in a non-Latin folder can be linked and reached by name.
   const cyr = path.join(HOME, "projects", "Термопомпа оферти");
@@ -98,6 +102,8 @@ try {
   assert.match(JSON.parse(hook.stdout).hookSpecificOutput.additionalContext, /здравей/);
 
   assert.equal(run(["uninstall"]).status, 0);
+  const uninstalledToml = fs.readFileSync(path.join(HOME, ".codex", "config.toml"), "utf8");
+  assert.ok(uninstalledToml.includes(unrelated.trimStart()), "uninstall preserves array-of-tables and its child table");
   for (const f of [".claude.json", ".claude/settings.json", ".codex/config.toml", ".codex/hooks.json"]) {
     assert.doesNotMatch(fs.readFileSync(path.join(HOME, f), "utf8"), /agent-bridge/, `${f} cleaned`);
   }
