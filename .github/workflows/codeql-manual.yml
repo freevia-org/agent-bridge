@@ -24,6 +24,8 @@ permissions:
 
 jobs:
   analyze:
+    # CodeQL runs on persistent self-hosted runners; constrain manual scans to the default branch.
+    if: github.ref == 'refs/heads/main'
     name: Analyze (${{ matrix.language }})
     runs-on: ${{ inputs.runner_pool == 'hosted' && matrix.hosted_runner || matrix.runner }}
     timeout-minutes: ${{ inputs.runner_pool == 'hosted' && 120 || 180 }}
