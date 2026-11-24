@@ -6,6 +6,15 @@ name: Manual CodeQL security scan
 
 on:
   workflow_dispatch:
+    inputs:
+      runner_pool:
+        description: Use the local I5 runner when available, or GitHub-hosted Ubuntu.
+        type: choice
+        options:
+          - local
+          - hosted
+        default: local
+        required: true
 
 permissions:
   contents: read
@@ -16,8 +25,8 @@ permissions:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ contains(matrix.runner, '-i5-') && 180 || 120 }}
+    runs-on: ${{ inputs.runner_pool == 'hosted' && matrix.hosted_runner || matrix.runner }}
+    timeout-minutes: ${{ inputs.runner_pool == 'hosted' && 120 || 180 }}
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -25,9 +34,11 @@ jobs:
         include:
           - language: actions
             runner: agent-bridge-i5-linux
+            hosted_runner: ubuntu-24.04
             build-mode: none
           - language: javascript-typescript
             runner: agent-bridge-i5-linux
+            hosted_runner: ubuntu-24.04
             build-mode: none
     steps:
       - name: Start original execution budget after admission
